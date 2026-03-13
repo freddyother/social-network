@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS event_responses;
+DROP TABLE IF EXISTS group_events;
+DROP TABLE IF EXISTS group_comments;
+DROP TABLE IF EXISTS group_posts;
