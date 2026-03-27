@@ -18,6 +18,18 @@ export const THEME_OPTIONS = [
     label: "Graphite Gold",
     description: "Soft gold accents for a warmer premium look.",
     swatches: ["#050403", "#161513", "#d4a84f", "#f2c14e"]
+  },
+  {
+    value: "nexo-cloud",
+    label: "NEXO Cloud",
+    description: "Soft misty blues with a clean daylight canvas.",
+    swatches: ["#edf4fa", "#f5faff", "#2f8dff", "#58d6f5"]
+  },
+  {
+    value: "nexo-harbor",
+    label: "NEXO Harbor",
+    description: "Muted blue-grays for a calm premium look without black.",
+    swatches: ["#cfdbe8", "#344760", "#38a7ff", "#63d9ef"]
   }
 ]
 

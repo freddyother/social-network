@@ -1033,7 +1033,7 @@ func normalizeProfileVisibility(visibility string) (string, error) {
 func normalizeThemePreference(themePreference string) (string, error) {
 	normalized := strings.ToLower(strings.TrimSpace(themePreference))
 	switch normalized {
-	case "nexo-blue", "nexo-ice", "graphite-gold":
+	case "nexo-blue", "nexo-ice", "graphite-gold", "nexo-cloud", "nexo-harbor":
 		return normalized, nil
 	default:
 		return "", &ValidationError{

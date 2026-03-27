@@ -117,6 +117,108 @@
   --notification-unread-bg: rgba(212, 168, 79, 0.1);
 }
 
+:root[data-theme="nexo-cloud"] {
+  color-scheme: light;
+  --ink: #1f3550;
+  --muted: #6d7f95;
+  --card: rgba(255, 255, 255, 0.94);
+  --card-strong: rgba(245, 250, 255, 0.99);
+  --line: rgba(66, 116, 168, 0.14);
+  --accent: #2f8dff;
+  --accent-soft: rgba(47, 141, 255, 0.12);
+  --warm: #58d6f5;
+  --success: #31b98c;
+  --danger: #e56773;
+  --page-top-glow: rgba(88, 214, 245, 0.18);
+  --page-side-glow: rgba(47, 141, 255, 0.1);
+  --page-gradient-start: #f4f8fc;
+  --page-gradient-mid: #edf4fa;
+  --page-gradient-end: #e6eef6;
+  --body-top-glow: rgba(88, 214, 245, 0.12);
+  --body-sheen: rgba(255, 255, 255, 0.55);
+  --body-base: #edf4fa;
+  --sidebar-gradient-start: rgba(240, 246, 252, 0.98);
+  --sidebar-gradient-end: rgba(232, 240, 248, 0.98);
+  --brand-glow: rgba(47, 141, 255, 0.16);
+  --hover-border: rgba(47, 141, 255, 0.16);
+  --hover-bg: rgba(47, 141, 255, 0.06);
+  --hover-shadow: rgba(78, 104, 136, 0.14);
+  --tooltip-border: rgba(66, 116, 168, 0.14);
+  --tooltip-bg: rgba(255, 255, 255, 0.98);
+  --tooltip-shadow: rgba(92, 117, 146, 0.16);
+  --panel-shadow: rgba(118, 148, 185, 0.12);
+  --status-idle: #98a8bc;
+  --notification-pill-start: #2f8dff;
+  --notification-pill-end: #58d6f5;
+  --status-pill-bg: rgba(255, 255, 255, 0.7);
+  --header-logo-glow: rgba(47, 141, 255, 0.14);
+  --button-gradient-start: #2f8dff;
+  --button-gradient-end: #58d6f5;
+  --ghost-bg: rgba(255, 255, 255, 0.72);
+  --inset-bg: rgba(239, 245, 251, 0.88);
+  --frame-bg: rgba(255, 255, 255, 0.82);
+  --dot-bg: rgba(47, 141, 255, 0.18);
+  --badge-soft-bg: rgba(88, 214, 245, 0.14);
+  --badge-neutral-bg: rgba(31, 53, 80, 0.08);
+  --user-card-bg: rgba(255, 255, 255, 0.75);
+  --comment-card-bg: rgba(245, 250, 255, 0.92);
+  --reply-card-bg: rgba(47, 141, 255, 0.08);
+  --notification-card-bg: rgba(255, 255, 255, 0.82);
+  --notification-unread-border: rgba(47, 141, 255, 0.24);
+  --notification-unread-bg: rgba(47, 141, 255, 0.08);
+}
+
+:root[data-theme="nexo-harbor"] {
+  color-scheme: dark;
+  --ink: #edf5ff;
+  --muted: #9fb1c7;
+  --card: rgba(45, 60, 82, 0.92);
+  --card-strong: rgba(54, 71, 96, 0.98);
+  --line: rgba(132, 180, 226, 0.16);
+  --accent: #38a7ff;
+  --accent-soft: rgba(56, 167, 255, 0.14);
+  --warm: #63d9ef;
+  --success: #43c79d;
+  --danger: #ef7b86;
+  --page-top-glow: rgba(99, 217, 239, 0.14);
+  --page-side-glow: rgba(56, 167, 255, 0.08);
+  --page-gradient-start: #d8e3ee;
+  --page-gradient-mid: #ccd8e5;
+  --page-gradient-end: #c2cfdd;
+  --body-top-glow: rgba(255, 255, 255, 0.06);
+  --body-sheen: rgba(255, 255, 255, 0.04);
+  --body-base: #cfdbe8;
+  --sidebar-gradient-start: rgba(61, 79, 105, 0.97);
+  --sidebar-gradient-end: rgba(52, 69, 92, 0.97);
+  --brand-glow: rgba(56, 167, 255, 0.18);
+  --hover-border: rgba(132, 180, 226, 0.18);
+  --hover-bg: rgba(255, 255, 255, 0.05);
+  --hover-shadow: rgba(59, 75, 97, 0.18);
+  --tooltip-border: rgba(132, 180, 226, 0.18);
+  --tooltip-bg: rgba(60, 78, 103, 0.98);
+  --tooltip-shadow: rgba(50, 66, 86, 0.26);
+  --panel-shadow: rgba(83, 105, 133, 0.16);
+  --status-idle: #a7b6ca;
+  --notification-pill-start: #38a7ff;
+  --notification-pill-end: #63d9ef;
+  --status-pill-bg: rgba(255, 255, 255, 0.05);
+  --header-logo-glow: rgba(56, 167, 255, 0.14);
+  --button-gradient-start: #38a7ff;
+  --button-gradient-end: #63d9ef;
+  --ghost-bg: rgba(255, 255, 255, 0.05);
+  --inset-bg: rgba(255, 255, 255, 0.04);
+  --frame-bg: rgba(255, 255, 255, 0.04);
+  --dot-bg: rgba(237, 245, 255, 0.2);
+  --badge-soft-bg: rgba(99, 217, 239, 0.16);
+  --badge-neutral-bg: rgba(255, 255, 255, 0.1);
+  --user-card-bg: rgba(255, 255, 255, 0.04);
+  --comment-card-bg: rgba(255, 255, 255, 0.045);
+  --reply-card-bg: rgba(56, 167, 255, 0.08);
+  --notification-card-bg: rgba(255, 255, 255, 0.05);
+  --notification-unread-border: rgba(56, 167, 255, 0.26);
+  --notification-unread-bg: rgba(56, 167, 255, 0.1);
+}
+
 * {
   box-sizing: border-box;
 }
