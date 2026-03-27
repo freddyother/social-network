@@ -4,6 +4,7 @@ import { useRouter } from "vue-router"
 
 import { isApiError, registerUser } from "../services/api"
 import { useAppStore } from "../stores/app"
+import { toISODateInput } from "../utils/date"
 
 const router = useRouter()
 const store = useAppStore()
@@ -44,7 +45,17 @@ async function handleSubmit() {
   isSubmitting.value = true
 
   try {
-    const user = await registerUser({ ...form })
+    const normalizedDateOfBirth = toISODateInput(form.dateOfBirth)
+    if (!normalizedDateOfBirth) {
+      fieldErrors.dateOfBirth = "Use the format dd/mm/yyyy."
+      formError.value = "Please correct the highlighted fields."
+      return
+    }
+
+    const user = await registerUser({
+      ...form,
+      dateOfBirth: normalizedDateOfBirth
+    })
 
     store.setCurrentUser(user)
     await router.push("/feed")
@@ -124,7 +135,11 @@ async function handleSubmit() {
           <span>Date of Birth</span>
           <input
             v-model="form.dateOfBirth"
-            type="date"
+            type="text"
+            inputmode="numeric"
+            placeholder="dd/mm/yyyy"
+            autocomplete="bday"
+            pattern="\\d{2}/\\d{2}/\\d{4}"
             :aria-invalid="Boolean(fieldErrors.dateOfBirth)"
             required
           />

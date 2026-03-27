@@ -1,5 +1,6 @@
 <script setup>
-import { computed, onBeforeUnmount, reactive, ref, watch } from "vue"
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue"
+import { useRoute } from "vue-router"
 
 import {
   acceptFollowRequest,
@@ -13,6 +14,7 @@ import {
 import { realtimeClient } from "../services/realtime"
 import { useAppStore } from "../stores/app"
 import { THEME_OPTIONS } from "../theme"
+import { formatDate } from "../utils/date"
 
 const props = defineProps({
   handle: {
@@ -22,6 +24,7 @@ const props = defineProps({
 })
 
 const store = useAppStore()
+const route = useRoute()
 const currentProfile = computed(() => (props.handle === "me" ? store.state.currentUser : null))
 const profileName = computed(() => {
   const user = currentProfile.value
@@ -49,6 +52,7 @@ const isSavingTheme = ref("")
 const loadingRequests = ref(false)
 const requestLoading = reactive({})
 const removeRealtimeListeners = []
+const followRequestsSection = ref(null)
 const activeThemePreference = computed(() => currentProfile.value?.themePreference || store.state.themePreference)
 const profileInitials = computed(() => {
   const user = currentProfile.value
@@ -200,13 +204,46 @@ function displayName(user) {
   return user.nickname || `${user.firstName} ${user.lastName}`.trim() || user.email
 }
 
+function routeSection() {
+  const rawValue = route.query.section
+  if (Array.isArray(rawValue)) {
+    return String(rawValue[0] || "").trim()
+  }
+
+  return typeof rawValue === "string" ? rawValue.trim() : ""
+}
+
+async function focusRequestedSection() {
+  if (!currentProfile.value) {
+    return
+  }
+
+  if (routeSection() !== "follow-requests") {
+    return
+  }
+
+  await nextTick()
+  followRequestsSection.value?.scrollIntoView({
+    behavior: "smooth",
+    block: "start"
+  })
+}
+
 watch(
   () => currentProfile.value?.id,
-  () => {
+  async () => {
     loadPrivacyValue()
-    void loadFollowRequests()
+    await loadFollowRequests()
+    await focusRequestedSection()
   },
   { immediate: true }
+)
+
+watch(
+  () => route.query.section,
+  () => {
+    void focusRequestedSection()
+  }
 )
 
 removeRealtimeListeners.push(
@@ -279,7 +316,7 @@ onBeforeUnmount(() => {
       <article class="panel">
         <template v-if="currentProfile">
           <h3>Account details</h3>
-          <p>Date of birth: {{ currentProfile.dateOfBirth }}</p>
+          <p>Date of birth: {{ formatDate(currentProfile.dateOfBirth) }}</p>
           <p>Nickname: {{ currentProfile.nickname || "Not set yet" }}</p>
           <p>Email: {{ currentProfile.email }}</p>
         </template>
@@ -355,7 +392,7 @@ onBeforeUnmount(() => {
         </section>
       </div>
 
-      <section class="panel">
+      <section ref="followRequestsSection" class="panel">
           <p class="eyebrow">Followers</p>
           <h3>Pending follow requests</h3>
           <p v-if="requestError" class="form-error">{{ requestError }}</p>

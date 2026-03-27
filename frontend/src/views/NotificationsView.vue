@@ -1,12 +1,14 @@
 <script setup>
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue"
-import { RouterLink } from "vue-router"
+import { useRouter } from "vue-router"
 
 import { fetchNotifications, isApiError, markNotificationRead } from "../services/api"
 import { realtimeClient } from "../services/realtime"
 import { useAppStore } from "../stores/app"
+import { formatDateTime } from "../utils/date"
 
 const store = useAppStore()
+const router = useRouter()
 const notifications = ref([])
 const requestError = ref("")
 const isLoading = ref(false)
@@ -16,10 +18,7 @@ const unreadCount = computed(() => notifications.value.filter((item) => !item.is
 const removeRealtimeListeners = []
 
 function formatDate(value) {
-  return new Intl.DateTimeFormat("en-GB", {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(new Date(value))
+  return formatDateTime(value)
 }
 
 function typeLabel(type) {
@@ -48,6 +47,14 @@ async function loadNotificationsInbox() {
 }
 
 async function handleMarkRead(notificationId) {
+  return markNotificationAsRead(notificationId)
+}
+
+async function markNotificationAsRead(notificationId) {
+  if (!notificationId) {
+    return true
+  }
+
   readLoading[notificationId] = true
   requestError.value = ""
 
@@ -57,15 +64,85 @@ async function handleMarkRead(notificationId) {
       item.id === notificationId ? { ...item, isRead: true } : item
     )
     store.setNotificationUnreadCount(unreadCount.value)
+    return true
   } catch (error) {
     if (isApiError(error)) {
       requestError.value = error.message
     } else {
       requestError.value = "Could not update this notification."
     }
+    return false
   } finally {
     readLoading[notificationId] = false
   }
+}
+
+function notificationTarget(notification) {
+  if (!notification) {
+    return null
+  }
+
+  if (notification.entityType === "conversation" && notification.entityId) {
+    return {
+      path: "/chat",
+      query: { user: notification.entityId }
+    }
+  }
+
+  if (notification.entityType === "post" && notification.entityId) {
+    return {
+      path: "/feed",
+      query: { post: notification.entityId, comments: "1" }
+    }
+  }
+
+  if (notification.type === "follow_request_received") {
+    return {
+      path: "/profile/me",
+      query: { section: "follow-requests" }
+    }
+  }
+
+  if (notification.type === "follow_request_accepted") {
+    return {
+      path: "/feed"
+    }
+  }
+
+  return null
+}
+
+function notificationActionLabel(notification) {
+  if (notification?.entityType === "conversation") {
+    return "Open chat"
+  }
+
+  if (notification?.entityType === "post") {
+    return "Open post"
+  }
+
+  if (notification?.type === "follow_request_received") {
+    return "Open requests"
+  }
+
+  if (notification?.type === "follow_request_accepted") {
+    return "Open feed"
+  }
+
+  return ""
+}
+
+async function openNotification(notification) {
+  const target = notificationTarget(notification)
+  if (!target) {
+    return
+  }
+
+  if (!notification.isRead) {
+    await markNotificationAsRead(notification.id)
+  }
+
+  await router.push(target)
 }
 
 watch(
@@ -162,20 +239,14 @@ onBeforeUnmount(() => {
               </div>
               <h3>{{ notification.title }}</h3>
               <p>{{ notification.body }}</p>
-              <RouterLink
-                v-if="notification.entityType === 'post'"
-                to="/feed"
-                class="notification-card__link"
+              <button
+                v-if="notificationTarget(notification)"
+                type="button"
+                class="notification-card__link notification-card__link-button"
+                @click="openNotification(notification)"
               >
-                Open feed
-              </RouterLink>
-              <RouterLink
-                v-else-if="notification.entityType === 'conversation' && notification.entityId"
-                :to="{ path: '/chat', query: { user: notification.entityId } }"
-                class="notification-card__link"
-              >
-                Open chat
-              </RouterLink>
+                {{ notificationActionLabel(notification) }}
+              </button>
             </div>
 
             <button

@@ -22,6 +22,7 @@ type Hub struct {
 	userClients        map[string]map[*Client]struct{}
 	postClients        map[string]map[*Client]struct{}
 	postSubscriptionOK func(ctx context.Context, userID, postID string) bool
+	userConnected      func(ctx context.Context, userID string)
 	messageDelivered   func(ctx context.Context, userID, messageID string)
 	conversationRead   func(ctx context.Context, userID, conversationUserID string)
 	chatHistory        func(ctx context.Context, userID, conversationUserID, beforeMessageID string, limit int) (any, error)
@@ -69,6 +70,13 @@ func (h *Hub) SetPostSubscriptionAuthorizer(authorizer func(ctx context.Context,
 	h.postSubscriptionOK = authorizer
 }
 
+func (h *Hub) SetUserConnectedHandler(handler func(ctx context.Context, userID string)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.userConnected = handler
+}
+
 func (h *Hub) SetMessageDeliveredHandler(handler func(ctx context.Context, userID, messageID string)) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -106,6 +114,7 @@ func (h *Hub) ServeConn(userID string, conn *websocket.Conn) {
 
 	go client.writePump()
 	go client.readPump()
+	h.handleUserConnected(client.userID)
 }
 
 func (h *Hub) PublishToUser(userID, eventType string, payload any) {
@@ -420,6 +429,18 @@ func (h *Hub) handleDeliveredAck(userID, messageID string) {
 	}
 
 	go handler(context.Background(), strings.TrimSpace(userID), strings.TrimSpace(messageID))
+}
+
+func (h *Hub) handleUserConnected(userID string) {
+	h.mu.RLock()
+	handler := h.userConnected
+	h.mu.RUnlock()
+
+	if handler == nil {
+		return
+	}
+
+	go handler(context.Background(), strings.TrimSpace(userID))
 }
 
 func (h *Hub) handleConversationRead(userID, conversationUserID string) {

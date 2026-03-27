@@ -5,11 +5,14 @@ import { useRoute, useRouter } from "vue-router"
 import {
   fetchChatConversations,
   fetchDiscoverUsers,
+  fetchNotifications,
   isApiError,
+  markNotificationRead,
   sendPrivateMessage
 } from "../services/api"
 import { realtimeClient } from "../services/realtime"
 import { useAppStore } from "../stores/app"
+import { formatDate, formatDateTime, formatTime } from "../utils/date"
 
 const store = useAppStore()
 const route = useRoute()
@@ -41,6 +44,7 @@ const removeRealtimeListeners = []
 const isAuthenticated = computed(() => Boolean(store.state.currentUser))
 const currentUserId = computed(() => store.state.currentUser?.id || "")
 const activeConversationUserId = computed(() => routeConversationUserId())
+const notificationCleanupLoading = reactive({})
 
 const MESSAGE_GROUP_WINDOW_MS = 2 * 60 * 1000
 const HISTORY_PAGE_SIZE = 10
@@ -98,47 +102,15 @@ function conversationPreview(message) {
 }
 
 function formatConversationTime(value) {
-  if (!value) {
-    return ""
-  }
-
-  const date = new Date(value)
-  const now = new Date()
-  const sameDay = date.toDateString() === now.toDateString()
-
-  return new Intl.DateTimeFormat("en-GB", sameDay ? { hour: "2-digit", minute: "2-digit" } : {
-    day: "2-digit",
-    month: "short"
-  }).format(date)
+  return formatDateTime(value)
 }
 
 function formatMessageTime(value) {
-  return new Intl.DateTimeFormat("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(value))
+  return formatTime(value)
 }
 
 function formatMessageDay(value) {
-  const target = new Date(value)
-  const today = new Date()
-  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate())
-  const startOfTarget = new Date(target.getFullYear(), target.getMonth(), target.getDate())
-  const diffDays = Math.round((startOfToday - startOfTarget) / (24 * 60 * 60 * 1000))
-
-  if (diffDays === 0) {
-    return "Today"
-  }
-
-  if (diffDays === 1) {
-    return "Yesterday"
-  }
-
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric"
-  }).format(target)
+  return formatDate(value)
 }
 
 function dayKey(value) {
@@ -169,6 +141,38 @@ function knownConversationUser(userId) {
     discoverUsers.value.find((user) => sameConversation(user.id, normalizedUserId)) ||
     (sameConversation(conversationUser.value?.id, normalizedUserId) ? conversationUser.value : null)
   )
+}
+
+async function clearConversationNotifications(conversationUserId) {
+  const normalizedConversationUserId = String(conversationUserId || "").trim()
+  if (!normalizedConversationUserId || !isAuthenticated.value || notificationCleanupLoading[normalizedConversationUserId]) {
+    return
+  }
+
+  notificationCleanupLoading[normalizedConversationUserId] = true
+
+  try {
+    const notifications = await fetchNotifications()
+    const directMessageNotifications = notifications.filter(
+      (notification) =>
+        !notification.isRead &&
+        notification.type === "direct_message" &&
+        notification.entityType === "conversation" &&
+        sameConversation(notification.entityId, normalizedConversationUserId)
+    )
+
+    if (!directMessageNotifications.length) {
+      return
+    }
+
+    await Promise.allSettled(
+      directMessageNotifications.map((notification) => markNotificationRead(notification.id))
+    )
+  } catch {
+    // Ignore notification cleanup failures to keep the chat accessible.
+  } finally {
+    notificationCleanupLoading[normalizedConversationUserId] = false
+  }
 }
 
 const groupedMessageDays = computed(() => {
@@ -726,6 +730,7 @@ watch(
 
     if (conversationUserId) {
       realtimeClient.enterChatView(conversationUserId)
+      void clearConversationNotifications(conversationUserId)
     } else {
       realtimeClient.leaveChatView()
     }

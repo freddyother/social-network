@@ -1,5 +1,6 @@
 <script setup>
-import { computed, onBeforeUnmount, reactive, ref, watch } from "vue"
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue"
+import { useRoute } from "vue-router"
 
 import {
   createComment,
@@ -11,8 +12,10 @@ import {
 } from "../services/api"
 import { realtimeClient } from "../services/realtime"
 import { useAppStore } from "../stores/app"
+import { formatDateTime } from "../utils/date"
 
 const store = useAppStore()
+const route = useRoute()
 
 const isAuthenticated = computed(() => Boolean(store.state.currentUser))
 const posts = ref([])
@@ -40,10 +43,7 @@ function displayName(user) {
 }
 
 function formatDate(value) {
-  return new Intl.DateTimeFormat("en-GB", {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(new Date(value))
+  return formatDateTime(value)
 }
 
 function commentCountLabel(count) {
@@ -54,6 +54,24 @@ function clearObject(object) {
   Object.keys(object).forEach((key) => {
     delete object[key]
   })
+}
+
+function routePostId() {
+  const rawValue = route.query.post
+  if (Array.isArray(rawValue)) {
+    return String(rawValue[0] || "").trim()
+  }
+
+  return typeof rawValue === "string" ? rawValue.trim() : ""
+}
+
+function shouldOpenCommentsFromRoute() {
+  const rawValue = route.query.comments
+  if (Array.isArray(rawValue)) {
+    return rawValue.includes("1")
+  }
+
+  return String(rawValue || "").trim() === "1"
 }
 
 function unsubscribeAllPostRooms() {
@@ -135,6 +153,8 @@ async function loadFeedData() {
       activeSlides[post.id] = 0
       ensureCommentState(post.id)
     }
+
+    await focusPostFromRoute()
   } catch (error) {
     requestError.value = error instanceof Error ? error.message : "Could not load the feed."
   } finally {
@@ -250,6 +270,34 @@ async function handleFollow(userId) {
   }
 }
 
+async function focusPostFromRoute() {
+  const postId = routePostId()
+  if (!postId || !isAuthenticated.value) {
+    return
+  }
+
+  const targetPost = posts.value.find((post) => post.id === postId)
+  if (!targetPost) {
+    return
+  }
+
+  if (shouldOpenCommentsFromRoute()) {
+    ensureCommentState(targetPost.id)
+
+    if (!expandedComments[targetPost.id]) {
+      await toggleComments(targetPost)
+    } else if (!commentsByPost[targetPost.id]?.length) {
+      await loadComments(targetPost.id)
+    }
+  }
+
+  await nextTick()
+  document.getElementById(`post-${targetPost.id}`)?.scrollIntoView({
+    behavior: "smooth",
+    block: "start"
+  })
+}
+
 function currentSlide(post) {
   return activeSlides[post.id] || 0
 }
@@ -343,6 +391,13 @@ watch(
   },
   { immediate: true }
 )
+
+watch(
+  () => [route.query.post, route.query.comments],
+  () => {
+    void focusPostFromRoute()
+  }
+)
 </script>
 
 <template>
@@ -380,7 +435,7 @@ watch(
             <p>{{ isLoading ? "Refreshing the feed..." : `${posts.length} visible posts` }}</p>
           </div>
 
-          <article v-for="post in posts" :key="post.id" class="panel post-card">
+          <article v-for="post in posts" :id="`post-${post.id}`" :key="post.id" class="panel post-card">
             <header class="post-card__header">
               <div>
                 <p class="eyebrow">Post</p>

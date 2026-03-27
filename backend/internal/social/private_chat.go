@@ -467,6 +467,65 @@ func (s Service) MarkMessageDelivered(ctx context.Context, recipientID, messageI
 	return nil
 }
 
+func (s Service) MarkUndeliveredMessagesDelivered(ctx context.Context, recipientID string) error {
+	normalizedRecipientID := strings.TrimSpace(recipientID)
+	if normalizedRecipientID == "" {
+		return nil
+	}
+
+	deliveredAt := time.Now().UTC()
+	rows, err := s.db.QueryContext(
+		ctx,
+		`
+			UPDATE private_messages
+			SET delivered_at = $2
+			WHERE recipient_id = $1
+			  AND delivered_at IS NULL
+			RETURNING id, sender_id
+		`,
+		normalizedRecipientID,
+		deliveredAt,
+	)
+	if err != nil {
+		return fmt.Errorf("mark undelivered messages delivered: %w", err)
+	}
+	defer rows.Close()
+
+	messageIDsBySender := make(map[string][]string)
+	for rows.Next() {
+		var (
+			messageID string
+			senderID  string
+		)
+		if err := rows.Scan(&messageID, &senderID); err != nil {
+			return fmt.Errorf("scan delivered private message: %w", err)
+		}
+
+		messageIDsBySender[senderID] = append(messageIDsBySender[senderID], messageID)
+	}
+
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate delivered private messages: %w", err)
+	}
+
+	for senderID, messageIDs := range messageIDsBySender {
+		event := MessageDeliveryEvent{
+			ConversationUserID: normalizedRecipientID,
+			MessageIDs:         messageIDs,
+			DeliveredAt:        deliveredAt,
+		}
+
+		s.publisher.PublishToUser(senderID, "chat.message.delivered", event)
+		s.publisher.PublishToUser(normalizedRecipientID, "chat.message.delivered", MessageDeliveryEvent{
+			ConversationUserID: senderID,
+			MessageIDs:         messageIDs,
+			DeliveredAt:        deliveredAt,
+		})
+	}
+
+	return nil
+}
+
 func (s Service) MarkConversationRead(ctx context.Context, viewerID, partnerID string) (ConversationReadResult, error) {
 	normalizedPartnerID, err := normalizeConversationPartner(viewerID, partnerID)
 	if err != nil {

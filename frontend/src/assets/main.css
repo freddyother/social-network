@@ -261,6 +261,10 @@ select {
     linear-gradient(180deg, var(--page-gradient-start) 0%, var(--page-gradient-mid) 48%, var(--page-gradient-end) 100%);
 }
 
+.shell--guest {
+  grid-template-columns: 1fr;
+}
+
 .shell__sidebar {
   position: sticky;
   top: 0;
@@ -1327,6 +1331,14 @@ label {
 .notification-card__link {
   color: var(--accent);
   font-weight: 700;
+}
+
+.notification-card__link-button {
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
 }
 
 input,

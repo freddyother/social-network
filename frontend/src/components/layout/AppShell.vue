@@ -177,8 +177,8 @@ watch(
 </script>
 
 <template>
-  <div class="shell">
-    <aside class="shell__sidebar">
+  <div class="shell" :class="{ 'shell--guest': !isAuthenticated }">
+    <aside v-if="isAuthenticated" class="shell__sidebar">
       <RouterLink to="/feed" class="shell__brand" title="Go to the feed">
         <img src="/nexo-mark.png" alt="NEXO mark" class="shell__brand-logo" />
       </RouterLink>

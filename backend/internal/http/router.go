@@ -23,6 +23,9 @@ func NewRouter(cfg config.Config, db *sql.DB) stdlibhttp.Handler {
 	realtimeHub := realtime.NewHub()
 	socialService := social.NewService(db, cfg.UploadsDir, cfg.PublicBaseURL, realtimeHub)
 	realtimeHub.SetPostSubscriptionAuthorizer(socialService.CanViewPost)
+	realtimeHub.SetUserConnectedHandler(func(ctx context.Context, userID string) {
+		_ = socialService.MarkUndeliveredMessagesDelivered(ctx, userID)
+	})
 	realtimeHub.SetMessageDeliveredHandler(func(ctx context.Context, userID, messageID string) {
 		_ = socialService.MarkMessageDelivered(ctx, userID, messageID)
 	})
