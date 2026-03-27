@@ -13,6 +13,7 @@ This backend uses `PostgreSQL`
 - `PostgreSQL` connection setup
 - self-managed SQL migrations applied on startup
 - initial endpoints: `GET /api/v1/health` and `GET /api/v1/meta`
+- authentication endpoints with secure password hashing and session cookies
 - a structure ready to grow into auth, followers, posts, groups, notifications, and chat
 
 ## Structure
@@ -40,6 +41,9 @@ PORT=8080
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/social_network?sslmode=disable
 MIGRATIONS_DIR=./pkg/db/migrations/postgres
 CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173
+SESSION_COOKIE_NAME=social_network_session
+SESSION_TTL_HOURS=720
+SESSION_COOKIE_SECURE=false
 ```
 
 ## Local Run
@@ -53,10 +57,13 @@ go run ./server.go
 
 - `GET /api/v1/health`
 - `GET /api/v1/meta`
+- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/login`
+- `POST /api/v1/auth/logout`
+- `GET /api/v1/auth/me`
 
 ## Recommended Next Layers
 
-- `internal/auth` for registration, login, logout, sessions, and cookies
 - `internal/users` for public and private profiles
 - `internal/posts` for feed, comments, and images
 - `internal/groups` for groups, invitations, and events

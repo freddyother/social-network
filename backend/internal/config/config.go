@@ -2,7 +2,9 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -12,6 +14,7 @@ type Config struct {
 	DatabaseURL   string
 	MigrationsDir string
 	CORS          CORSConfig
+	Session       SessionConfig
 }
 
 type CORSConfig struct {
@@ -21,9 +24,17 @@ type CORSConfig struct {
 	AllowCredentials bool
 }
 
+type SessionConfig struct {
+	CookieName string
+	TTL        time.Duration
+	Secure     bool
+}
+
 func Load() Config {
+	appEnv := getEnv("APP_ENV", "development")
+
 	return Config{
-		AppEnv:        getEnv("APP_ENV", "development"),
+		AppEnv:        appEnv,
 		Host:          getEnv("HOST", "0.0.0.0"),
 		Port:          getEnv("PORT", "8080"),
 		DatabaseURL:   getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/social_network?sslmode=disable"),
@@ -38,6 +49,11 @@ func Load() Config {
 			AllowedMethods:   splitCSV(getEnv("CORS_ALLOWED_METHODS", "GET,POST,PUT,PATCH,DELETE,OPTIONS")),
 			AllowedHeaders:   splitCSV(getEnv("CORS_ALLOWED_HEADERS", "Accept,Authorization,Content-Type,X-Requested-With")),
 			AllowCredentials: true,
+		},
+		Session: SessionConfig{
+			CookieName: getEnv("SESSION_COOKIE_NAME", "social_network_session"),
+			TTL:        getEnvDurationHours("SESSION_TTL_HOURS", 24*30),
+			Secure:     getEnvBool("SESSION_COOKIE_SECURE", appEnv == "production"),
 		},
 	}
 }
@@ -62,4 +78,32 @@ func splitCSV(value string) []string {
 	}
 
 	return items
+}
+
+func getEnvDurationHours(key string, fallbackHours int) time.Duration {
+	value := getEnv(key, "")
+	if value == "" {
+		return time.Duration(fallbackHours) * time.Hour
+	}
+
+	hours, err := strconv.Atoi(value)
+	if err != nil || hours <= 0 {
+		return time.Duration(fallbackHours) * time.Hour
+	}
+
+	return time.Duration(hours) * time.Hour
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	value := strings.ToLower(getEnv(key, ""))
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+
+	return parsed
 }

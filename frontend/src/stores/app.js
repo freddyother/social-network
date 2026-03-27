@@ -21,11 +21,16 @@ export function useAppStore() {
     state.currentUser = user
   }
 
+  function clearCurrentUser() {
+    state.currentUser = null
+  }
+
   return {
     state,
     isAuthenticated,
     setApiStatus,
     setMeta,
-    setCurrentUser
+    setCurrentUser,
+    clearCurrentUser
   }
 }

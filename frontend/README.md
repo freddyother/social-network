@@ -9,6 +9,7 @@
 - an HTTP client pointing to the backend at `http://localhost:8080/api/v1`
 - a base layout for feed, profiles, groups, notifications, and chat
 - ready to work with `CORS` and session cookies
+- working authentication flow for register, login, logout, and current session bootstrap
 - a Dockerfile for static build and deployment
 
 ## Environment Variables
@@ -43,4 +44,4 @@ npm run dev
 
 ## Natural Next Step
 
-Connect these views to real backend endpoints for registration, login, feed, profiles, groups, WebSocket chat, and notifications.
+Build the first authenticated product modules on top of the new session flow: feed, profile privacy, followers, groups, notifications, and WebSocket chat.
