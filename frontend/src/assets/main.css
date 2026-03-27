@@ -825,6 +825,188 @@ label {
   max-width: 860px;
 }
 
+.chat-layout {
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: minmax(300px, 0.95fr) minmax(0, 1.65fr);
+  align-items: start;
+}
+
+.chat-sidebar,
+.chat-panel {
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+}
+
+.chat-sidebar__section {
+  display: grid;
+  gap: 1rem;
+}
+
+.chat-thread-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.chat-thread,
+.chat-user-card {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--user-card-bg);
+  color: var(--ink);
+  cursor: pointer;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    transform 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.chat-thread:hover,
+.chat-thread--active,
+.chat-user-card:hover {
+  border-color: var(--notification-unread-border);
+  background: var(--hover-bg);
+  transform: translateY(-1px);
+  box-shadow: 0 18px 32px var(--panel-shadow);
+}
+
+.chat-thread {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.9rem;
+  align-items: center;
+  padding: 0.95rem 1rem;
+  text-align: left;
+}
+
+.chat-thread__content,
+.chat-thread__head,
+.chat-thread__body,
+.chat-user-card__identity {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.chat-thread__head,
+.chat-thread__body {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.chat-thread__content small,
+.chat-user-card__identity small,
+.chat-empty-state p,
+.chat-panel__identity p,
+.chat-composer__actions .feed-note {
+  color: var(--muted);
+}
+
+.chat-thread__content strong,
+.chat-thread__content small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-thread__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.45rem;
+  padding: 0.15rem 0.42rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--button-gradient-start), var(--button-gradient-end));
+  color: #fff;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.chat-user-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  padding: 0.95rem 1rem;
+  text-align: left;
+}
+
+.chat-user-card__identity {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.chat-panel__header,
+.chat-panel__identity,
+.chat-composer__actions,
+.chat-bubble footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.85rem;
+  align-items: center;
+}
+
+.chat-panel__identity {
+  justify-content: flex-start;
+}
+
+.chat-message-list {
+  display: grid;
+  gap: 0.85rem;
+  min-height: 420px;
+  padding: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.chat-bubble {
+  display: grid;
+  gap: 0.55rem;
+  max-width: min(78%, 540px);
+  padding: 0.95rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+}
+
+.chat-bubble p,
+.chat-bubble footer {
+  margin: 0;
+}
+
+.chat-bubble footer {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.chat-bubble--mine {
+  justify-self: end;
+  background: linear-gradient(135deg, var(--accent-soft), rgba(255, 255, 255, 0.03));
+  border-color: var(--notification-unread-border);
+}
+
+.chat-bubble--theirs {
+  justify-self: start;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.chat-composer {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.chat-empty-state {
+  display: grid;
+  gap: 0.7rem;
+  min-height: 520px;
+  align-content: center;
+  justify-items: start;
+}
+
 .create-post-panel__actions {
   display: flex;
   justify-content: flex-end;
@@ -984,6 +1166,7 @@ textarea::placeholder {
   .grid--two,
   .form-grid,
   .feed-layout,
+  .chat-layout,
   .feed-composer__row,
   .privacy-row {
     grid-template-columns: 1fr;
@@ -1049,6 +1232,11 @@ textarea::placeholder {
   .post-card__header,
   .feed-header,
   .user-card,
+  .chat-user-card,
+  .chat-panel__header,
+  .chat-panel__identity,
+  .chat-composer__actions,
+  .chat-bubble footer,
   .theme-option,
   .carousel__controls,
   .user-card__actions,
@@ -1072,6 +1260,16 @@ textarea::placeholder {
 
   .post-card__timestamps {
     text-align: left;
+  }
+
+  .chat-thread__head,
+  .chat-thread__body {
+    grid-template-columns: 1fr;
+    justify-items: start;
+  }
+
+  .chat-bubble {
+    max-width: 100%;
   }
 
   .comment-card--reply,

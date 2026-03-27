@@ -16,6 +16,10 @@ import (
 type socialService interface {
 	CreatePost(ctx context.Context, author auth.User, input social.CreatePostInput) (social.Post, error)
 	Feed(ctx context.Context, viewerID string) ([]social.Post, error)
+	Conversations(ctx context.Context, userID string) ([]social.ConversationSummary, error)
+	Conversation(ctx context.Context, viewerID, partnerID string) (social.ConversationThread, error)
+	SendPrivateMessage(ctx context.Context, sender auth.User, partnerID string, input social.SendPrivateMessageInput) (social.PrivateMessage, error)
+	MarkConversationRead(ctx context.Context, viewerID, partnerID string) (social.ConversationReadResult, error)
 	Comments(ctx context.Context, viewerID, postID string) ([]social.Comment, error)
 	CreateComment(ctx context.Context, author auth.User, postID string, input social.CreateCommentInput) (social.Comment, error)
 	DiscoverUsers(ctx context.Context, viewerID string) ([]social.SuggestedUser, error)
@@ -57,6 +61,90 @@ func (h SocialHandler) HandleFeed(w stdlibhttp.ResponseWriter, r *stdlibhttp.Req
 
 	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
 		"posts": posts,
+	})
+}
+
+func (h SocialHandler) HandleConversations(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	currentUser, ok := h.requireCurrentUser(w, r)
+	if !ok {
+		return
+	}
+
+	conversations, err := h.service.Conversations(r.Context(), currentUser.ID)
+	if err != nil {
+		h.handleSocialError(w, err)
+		return
+	}
+
+	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
+		"conversations": conversations,
+	})
+}
+
+func (h SocialHandler) HandleConversation(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	currentUser, ok := h.requireCurrentUser(w, r)
+	if !ok {
+		return
+	}
+
+	thread, err := h.service.Conversation(r.Context(), currentUser.ID, strings.TrimSpace(r.PathValue("userID")))
+	if err != nil {
+		h.handleSocialError(w, err)
+		return
+	}
+
+	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
+		"user":     thread.User,
+		"messages": thread.Messages,
+	})
+}
+
+func (h SocialHandler) HandleSendPrivateMessage(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	currentUser, ok := h.requireCurrentUser(w, r)
+	if !ok {
+		return
+	}
+
+	var payload struct {
+		Body string `json:"body"`
+	}
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdlibhttp.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	message, err := h.service.SendPrivateMessage(
+		r.Context(),
+		*currentUser,
+		strings.TrimSpace(r.PathValue("userID")),
+		social.SendPrivateMessageInput{
+			Body: payload.Body,
+		},
+	)
+	if err != nil {
+		h.handleSocialError(w, err)
+		return
+	}
+
+	response.JSON(w, stdlibhttp.StatusCreated, map[string]any{
+		"message": message,
+	})
+}
+
+func (h SocialHandler) HandleMarkConversationRead(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	currentUser, ok := h.requireCurrentUser(w, r)
+	if !ok {
+		return
+	}
+
+	result, err := h.service.MarkConversationRead(r.Context(), currentUser.ID, strings.TrimSpace(r.PathValue("userID")))
+	if err != nil {
+		h.handleSocialError(w, err)
+		return
+	}
+
+	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
+		"conversation": result,
 	})
 }
 

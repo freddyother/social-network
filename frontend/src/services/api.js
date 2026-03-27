@@ -39,6 +39,17 @@ function normalizeUser(user) {
   }
 }
 
+function normalizeConversation(conversation) {
+  if (!conversation) {
+    return null
+  }
+
+  return {
+    ...conversation,
+    user: normalizeUser(conversation.user)
+  }
+}
+
 async function request(path, options = {}) {
   const headers = new Headers({
     Accept: "application/json",
@@ -116,6 +127,41 @@ export function logoutUser() {
 export async function fetchFeed() {
   const payload = await request("/posts", { method: "GET" })
   return payload?.posts || []
+}
+
+export async function fetchChatConversations() {
+  const payload = await request("/chat/conversations", { method: "GET" })
+  return (payload?.conversations || []).map(normalizeConversation)
+}
+
+export async function fetchConversation(userId) {
+  const payload = await request(`/chat/conversations/${userId}/messages`, { method: "GET" })
+
+  return {
+    user: normalizeUser(payload?.user || null),
+    messages: payload?.messages || []
+  }
+}
+
+export async function sendPrivateMessage(userId, message) {
+  const payload = await request(`/chat/conversations/${userId}/messages`, {
+    method: "POST",
+    body: JSON.stringify(message)
+  })
+
+  return payload?.message || null
+}
+
+export async function markConversationRead(userId) {
+  const payload = await request(`/chat/conversations/${userId}/read`, {
+    method: "POST"
+  })
+
+  return payload?.conversation || {
+    conversationUserId: userId,
+    messageIds: [],
+    readAt: null
+  }
 }
 
 export async function fetchComments(postId) {

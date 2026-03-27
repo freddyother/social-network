@@ -40,7 +40,7 @@ const navItems = [
   },
   {
     label: "Chat",
-    description: "Open the space reserved for private and group chat.",
+    description: "Open your private conversations with live delivery and read receipts.",
     to: "/chat",
     icon: "chat"
   }
