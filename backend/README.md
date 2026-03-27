@@ -14,6 +14,7 @@ This backend uses `PostgreSQL`
 - self-managed SQL migrations applied on startup
 - initial endpoints: `GET /api/v1/health` and `GET /api/v1/meta`
 - authentication endpoints with secure password hashing and session cookies
+- feed endpoints with multi-image uploads, follower-only posts, public/private accounts, and follow requests
 - a structure ready to grow into auth, followers, posts, groups, notifications, and chat
 
 ## Structure
@@ -40,6 +41,8 @@ HOST=0.0.0.0
 PORT=8080
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/social_network?sslmode=disable
 MIGRATIONS_DIR=./pkg/db/migrations/postgres
+UPLOADS_DIR=./uploads
+PUBLIC_BASE_URL=http://localhost:8080
 CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173
 SESSION_COOKIE_NAME=social_network_session
 SESSION_TTL_HOURS=720
@@ -61,6 +64,14 @@ go run ./server.go
 - `POST /api/v1/auth/login`
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
+- `GET /api/v1/posts`
+- `POST /api/v1/posts`
+- `GET /api/v1/users/discover`
+- `POST /api/v1/users/{userID}/follow`
+- `GET /api/v1/follow-requests`
+- `POST /api/v1/follow-requests/{requestID}/accept`
+- `POST /api/v1/follow-requests/{requestID}/decline`
+- `PATCH /api/v1/users/me/profile-visibility`
 
 ## Recommended Next Layers
 

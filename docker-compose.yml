@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - social_network_pg_data:/var/lib/postgresql/data
     healthcheck:
@@ -26,6 +26,8 @@ services:
       PORT: 8080
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/social_network?sslmode=disable
       MIGRATIONS_DIR: /app/pkg/db/migrations/postgres
+      UPLOADS_DIR: /app/uploads
+      PUBLIC_BASE_URL: http://localhost:8080
       CORS_ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173
       CORS_ALLOWED_METHODS: GET,POST,PUT,PATCH,DELETE,OPTIONS
       CORS_ALLOWED_HEADERS: Accept,Authorization,Content-Type,X-Requested-With

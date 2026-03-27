@@ -46,7 +46,8 @@ a {
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
@@ -217,6 +218,177 @@ textarea {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.feed-layout {
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: minmax(0, 1.8fr) minmax(280px, 0.9fr);
+}
+
+.feed-side {
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+}
+
+.feed-composer__row,
+.privacy-row {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+}
+
+.feed-note,
+.post-card__meta,
+.post-card__timestamps,
+.feed-header p,
+.user-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.preview-strip {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+}
+
+.preview-strip__item {
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  aspect-ratio: 1 / 1;
+}
+
+.preview-strip__item img,
+.carousel__image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.feed-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+}
+
+.post-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.post-card__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.post-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: 0.65rem;
+}
+
+.post-card__timestamps {
+  display: grid;
+  gap: 0.25rem;
+  text-align: right;
+  font-size: 0.9rem;
+}
+
+.post-card__body {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+.carousel {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.carousel__frame {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.72);
+  aspect-ratio: 4 / 3;
+}
+
+.carousel__controls {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.carousel__dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  justify-content: center;
+}
+
+.carousel__dot {
+  width: 11px;
+  height: 11px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: rgba(29, 36, 51, 0.18);
+  cursor: pointer;
+}
+
+.carousel__dot--active {
+  background: var(--accent);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.badge--soft {
+  background: rgba(255, 141, 82, 0.14);
+  color: var(--warm);
+}
+
+.user-stack {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.user-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.user-card__actions {
+  display: flex;
+  gap: 0.65rem;
+}
+
 .feature-card__tag {
   margin: 0 0 0.45rem;
   color: var(--accent);
@@ -264,7 +436,8 @@ label {
 }
 
 input,
-textarea {
+textarea,
+select {
   width: 100%;
   padding: 0.9rem 1rem;
   border: 1px solid var(--line);
@@ -290,12 +463,28 @@ textarea {
 
   .grid--three,
   .grid--two,
-  .form-grid {
+  .form-grid,
+  .feed-layout,
+  .feed-composer__row,
+  .privacy-row {
     grid-template-columns: 1fr;
   }
 
   .shell__header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .post-card__header,
+  .feed-header,
+  .user-card,
+  .carousel__controls,
+  .user-card__actions {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .post-card__timestamps {
+    text-align: left;
   }
 }

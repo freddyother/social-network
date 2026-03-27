@@ -2,8 +2,10 @@ package app
 
 import (
 	"database/sql"
+	"fmt"
 	"net"
 	stdlibhttp "net/http"
+	"os"
 
 	"social-network/backend/internal/config"
 	transporthttp "social-network/backend/internal/http"
@@ -18,6 +20,10 @@ type App struct {
 
 func New() (*App, error) {
 	cfg := config.Load()
+
+	if err := os.MkdirAll(cfg.UploadsDir, 0o755); err != nil {
+		return nil, fmt.Errorf("ensure uploads directory: %w", err)
+	}
 
 	db, err := postgres.Open(cfg.DatabaseURL)
 	if err != nil {

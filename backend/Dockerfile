@@ -22,6 +22,8 @@ RUN mkdir -p /app/uploads
 ENV HOST=0.0.0.0
 ENV PORT=8080
 ENV MIGRATIONS_DIR=/app/pkg/db/migrations/postgres
+ENV UPLOADS_DIR=/app/uploads
+ENV PUBLIC_BASE_URL=http://localhost:8080
 
 EXPOSE 8080
 

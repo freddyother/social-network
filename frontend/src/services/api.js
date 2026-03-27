@@ -87,3 +87,57 @@ export async function registerUser(details) {
 export function logoutUser() {
   return request("/auth/logout", { method: "POST" })
 }
+
+export async function fetchFeed() {
+  const payload = await request("/posts", { method: "GET" })
+  return payload?.posts || []
+}
+
+export async function createPost(post) {
+  const formData = new FormData()
+  formData.set("title", post.title)
+  formData.set("body", post.body)
+  formData.set("privacy", post.privacy)
+
+  for (const image of post.images || []) {
+    formData.append("images", image)
+  }
+
+  const payload = await request("/posts", {
+    method: "POST",
+    body: formData
+  })
+
+  return payload?.post || null
+}
+
+export async function fetchDiscoverUsers() {
+  const payload = await request("/users/discover", { method: "GET" })
+  return payload?.users || []
+}
+
+export function followUser(userId) {
+  return request(`/users/${userId}/follow`, { method: "POST" })
+}
+
+export async function fetchFollowRequests() {
+  const payload = await request("/follow-requests", { method: "GET" })
+  return payload?.requests || []
+}
+
+export function acceptFollowRequest(requestId) {
+  return request(`/follow-requests/${requestId}/accept`, { method: "POST" })
+}
+
+export function declineFollowRequest(requestId) {
+  return request(`/follow-requests/${requestId}/decline`, { method: "POST" })
+}
+
+export async function updateProfileVisibility(visibility) {
+  const payload = await request("/users/me/profile-visibility", {
+    method: "PATCH",
+    body: JSON.stringify({ visibility })
+  })
+
+  return payload?.user || null
+}

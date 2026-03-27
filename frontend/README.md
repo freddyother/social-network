@@ -10,6 +10,7 @@
 - a base layout for feed, profiles, groups, notifications, and chat
 - ready to work with `CORS` and session cookies
 - working authentication flow for register, login, logout, and current session bootstrap
+- live feed with multi-image posts, follow suggestions, private account requests, and privacy controls
 - a Dockerfile for static build and deployment
 
 ## Environment Variables
@@ -44,4 +45,4 @@ npm run dev
 
 ## Natural Next Step
 
-Build the first authenticated product modules on top of the new session flow: feed, profile privacy, followers, groups, notifications, and WebSocket chat.
+Build on top of the feed slice: comments, richer profile pages, notifications for new requests and approvals, and eventually real-time chat.

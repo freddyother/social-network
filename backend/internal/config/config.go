@@ -13,6 +13,8 @@ type Config struct {
 	Port          string
 	DatabaseURL   string
 	MigrationsDir string
+	UploadsDir    string
+	PublicBaseURL string
 	CORS          CORSConfig
 	Session       SessionConfig
 }
@@ -39,6 +41,8 @@ func Load() Config {
 		Port:          getEnv("PORT", "8080"),
 		DatabaseURL:   getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/social_network?sslmode=disable"),
 		MigrationsDir: getEnv("MIGRATIONS_DIR", "./pkg/db/migrations/postgres"),
+		UploadsDir:    getEnv("UPLOADS_DIR", "./uploads"),
+		PublicBaseURL: strings.TrimRight(getEnv("PUBLIC_BASE_URL", "http://localhost:8080"), "/"),
 		CORS: CORSConfig{
 			AllowedOrigins: splitCSV(
 				getEnv(

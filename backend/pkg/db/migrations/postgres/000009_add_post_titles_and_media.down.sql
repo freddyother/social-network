@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS post_media;
+
+ALTER TABLE posts
+    DROP COLUMN IF EXISTS title;

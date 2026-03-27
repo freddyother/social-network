@@ -9,6 +9,7 @@ import (
 	"social-network/backend/internal/http/handlers"
 	"social-network/backend/internal/http/middleware"
 	"social-network/backend/internal/http/response"
+	"social-network/backend/internal/social"
 )
 
 func NewRouter(cfg config.Config, db *sql.DB) stdlibhttp.Handler {
@@ -16,7 +17,13 @@ func NewRouter(cfg config.Config, db *sql.DB) stdlibhttp.Handler {
 
 	healthHandler := handlers.NewHealthHandler(db)
 	metaHandler := handlers.NewMetaHandler(cfg)
-	authHandler := handlers.NewAuthHandler(auth.NewService(db, cfg.Session.TTL), cfg.Session)
+	authService := auth.NewService(db, cfg.Session.TTL)
+	authHandler := handlers.NewAuthHandler(authService, cfg.Session)
+	socialHandler := handlers.NewSocialHandler(
+		authService,
+		social.NewService(db, cfg.UploadsDir, cfg.PublicBaseURL),
+		cfg.Session,
+	)
 
 	mux.HandleFunc("GET /api/v1/health", healthHandler.Handle)
 	mux.HandleFunc("GET /api/v1/meta", metaHandler.Handle)
@@ -24,6 +31,15 @@ func NewRouter(cfg config.Config, db *sql.DB) stdlibhttp.Handler {
 	mux.HandleFunc("POST /api/v1/auth/login", authHandler.HandleLogin)
 	mux.HandleFunc("POST /api/v1/auth/logout", authHandler.HandleLogout)
 	mux.HandleFunc("GET /api/v1/auth/me", authHandler.HandleCurrentUser)
+	mux.HandleFunc("GET /api/v1/posts", socialHandler.HandleFeed)
+	mux.HandleFunc("POST /api/v1/posts", socialHandler.HandleCreatePost)
+	mux.HandleFunc("GET /api/v1/users/discover", socialHandler.HandleDiscoverUsers)
+	mux.HandleFunc("POST /api/v1/users/{userID}/follow", socialHandler.HandleFollowUser)
+	mux.HandleFunc("GET /api/v1/follow-requests", socialHandler.HandleFollowRequests)
+	mux.HandleFunc("POST /api/v1/follow-requests/{requestID}/accept", socialHandler.HandleAcceptFollowRequest)
+	mux.HandleFunc("POST /api/v1/follow-requests/{requestID}/decline", socialHandler.HandleDeclineFollowRequest)
+	mux.HandleFunc("PATCH /api/v1/users/me/profile-visibility", socialHandler.HandleUpdateProfileVisibility)
+	mux.Handle("GET /uploads/", stdlibhttp.StripPrefix("/uploads/", stdlibhttp.FileServer(stdlibhttp.Dir(cfg.UploadsDir))))
 	mux.HandleFunc("GET /", func(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
 		response.JSON(w, stdlibhttp.StatusOK, map[string]any{
 			"name":        "social-network",
