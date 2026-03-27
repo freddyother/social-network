@@ -1,21 +1,16 @@
 <script setup>
-import { computed, onMounted, ref, watch } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { RouterLink, useRoute, useRouter } from "vue-router"
 
 import { fetchCurrentUser, fetchHealth, fetchMeta, fetchNotifications, isApiError, logoutUser } from "../../services/api"
+import { realtimeClient } from "../../services/realtime"
 import { useAppStore } from "../../stores/app"
 import AppIcon from "../ui/AppIcon.vue"
 
 const navItems = [
   {
-    label: "Home",
-    description: "Overview and product direction.",
-    to: "/",
-    icon: "overview"
-  },
-  {
     label: "Feed",
-    description: "Browse posts, threads, and discover accounts.",
+    description: "Open the main timeline and discover accounts.",
     to: "/feed",
     icon: "feed"
   },
@@ -59,6 +54,7 @@ const authError = ref("")
 const isLoggingOut = ref(false)
 const isAuthenticated = computed(() => Boolean(store.state.currentUser))
 const unreadNotifications = computed(() => store.state.notificationUnreadCount)
+const removeRealtimeListeners = []
 const currentUserName = computed(() => {
   const user = store.state.currentUser
   if (!user) {
@@ -69,10 +65,6 @@ const currentUserName = computed(() => {
 })
 
 function isActive(item) {
-  if (item.to === "/") {
-    return route.path === "/"
-  }
-
   return route.path === item.to || route.path.startsWith(`${item.to}/`)
 }
 
@@ -127,7 +119,7 @@ async function handleLogout() {
   try {
     await logoutUser()
     store.clearCurrentUser()
-    await router.push("/")
+    await router.push("/feed")
   } catch (error) {
     authError.value = error instanceof Error ? error.message : "Could not log out"
   } finally {
@@ -136,12 +128,35 @@ async function handleLogout() {
 }
 
 onMounted(() => {
+  removeRealtimeListeners.push(
+    realtimeClient.on("notification.created", () => {
+      void refreshNotifications()
+    }),
+    realtimeClient.on("notification.read", () => {
+      void refreshNotifications()
+    }),
+    realtimeClient.on("ws.unauthorized", () => {
+      store.clearCurrentUser()
+    })
+  )
+
   void bootstrap()
+})
+
+onBeforeUnmount(() => {
+  removeRealtimeListeners.splice(0).forEach((dispose) => dispose())
+  realtimeClient.disconnect()
 })
 
 watch(
   () => store.state.currentUser?.id,
-  () => {
+  (userID) => {
+    if (userID) {
+      realtimeClient.connect(userID)
+    } else {
+      realtimeClient.disconnect()
+    }
+
     void refreshNotifications()
   }
 )
@@ -150,7 +165,7 @@ watch(
 <template>
   <div class="shell">
     <aside class="shell__sidebar">
-      <RouterLink to="/" class="shell__brand" title="Go to the home page">
+      <RouterLink to="/feed" class="shell__brand" title="Go to the feed">
         <img src="/nexo-logo.png" alt="NEXO logo" class="shell__brand-logo" />
         <span class="shell__brand-tagline">Share your world. your way.</span>
       </RouterLink>
@@ -164,7 +179,7 @@ watch(
           :class="{ 'shell__icon-link--active': isActive(item) }"
           :title="`${item.label}: ${item.description}`"
         >
-          <AppIcon :name="item.icon" :size="23" />
+          <AppIcon :name="item.icon" :size="26" />
           <span class="shell__icon-details">
             <strong>{{ item.label }}</strong>
             <small>{{ item.description }}</small>
@@ -191,7 +206,6 @@ watch(
     <div class="shell__content">
       <header class="shell__header">
         <div>
-          <p class="eyebrow">Architecture</p>
           <img
             src="/nexo-logo.png"
             :alt="store.state.meta?.name || 'NEXO'"

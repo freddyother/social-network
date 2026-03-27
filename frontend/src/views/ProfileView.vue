@@ -1,5 +1,5 @@
 <script setup>
-import { computed, reactive, ref, watch } from "vue"
+import { computed, onBeforeUnmount, reactive, ref, watch } from "vue"
 
 import {
   acceptFollowRequest,
@@ -8,6 +8,7 @@ import {
   isApiError,
   updateProfileVisibility
 } from "../services/api"
+import { realtimeClient } from "../services/realtime"
 import { useAppStore } from "../stores/app"
 
 const props = defineProps({
@@ -38,6 +39,7 @@ const requestError = ref("")
 const isSavingPrivacy = ref(false)
 const loadingRequests = ref(false)
 const requestLoading = reactive({})
+const removeRealtimeListeners = []
 
 function loadPrivacyValue() {
   privacyForm.visibility = currentProfile.value?.profileVisibility || "public"
@@ -118,6 +120,20 @@ watch(
   },
   { immediate: true }
 )
+
+removeRealtimeListeners.push(
+  realtimeClient.on("follow_request.created", () => {
+    if (!currentProfile.value) {
+      return
+    }
+
+    void loadFollowRequests()
+  })
+)
+
+onBeforeUnmount(() => {
+  removeRealtimeListeners.splice(0).forEach((dispose) => dispose())
+})
 </script>
 
 <template>

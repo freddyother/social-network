@@ -1,8 +1,9 @@
 <script setup>
-import { computed, reactive, ref, watch } from "vue"
+import { computed, onBeforeUnmount, reactive, ref, watch } from "vue"
 import { RouterLink } from "vue-router"
 
 import { fetchNotifications, isApiError, markNotificationRead } from "../services/api"
+import { realtimeClient } from "../services/realtime"
 import { useAppStore } from "../stores/app"
 
 const store = useAppStore()
@@ -12,6 +13,7 @@ const isLoading = ref(false)
 const readLoading = reactive({})
 const isAuthenticated = computed(() => Boolean(store.state.currentUser))
 const unreadCount = computed(() => notifications.value.filter((item) => !item.isRead).length)
+const removeRealtimeListeners = []
 
 function formatDate(value) {
   return new Intl.DateTimeFormat("en-GB", {
@@ -73,6 +75,37 @@ watch(
   },
   { immediate: true }
 )
+
+removeRealtimeListeners.push(
+  realtimeClient.on("notification.created", (event) => {
+    const notification = event.payload?.notification
+    if (!notification) {
+      return
+    }
+
+    if (notifications.value.some((item) => item.id === notification.id)) {
+      return
+    }
+
+    notifications.value = [notification, ...notifications.value]
+    store.setNotificationUnreadCount(unreadCount.value)
+  }),
+  realtimeClient.on("notification.read", (event) => {
+    const notificationId = event.payload?.notificationId
+    if (!notificationId) {
+      return
+    }
+
+    notifications.value = notifications.value.map((item) =>
+      item.id === notificationId ? { ...item, isRead: true } : item
+    )
+    store.setNotificationUnreadCount(unreadCount.value)
+  })
+)
+
+onBeforeUnmount(() => {
+  removeRealtimeListeners.splice(0).forEach((dispose) => dispose())
+})
 </script>
 
 <template>

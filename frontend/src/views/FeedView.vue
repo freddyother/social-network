@@ -1,5 +1,5 @@
 <script setup>
-import { computed, reactive, ref, watch } from "vue"
+import { computed, onBeforeUnmount, reactive, ref, watch } from "vue"
 
 import {
   createComment,
@@ -9,6 +9,7 @@ import {
   followUser,
   isApiError
 } from "../services/api"
+import { realtimeClient } from "../services/realtime"
 import { useAppStore } from "../stores/app"
 
 const store = useAppStore()
@@ -27,6 +28,8 @@ const commentErrorByPost = reactive({})
 const commentForms = reactive({})
 const replyForms = reactive({})
 const commentSubmitting = reactive({})
+const removeRealtimeListeners = []
+const subscribedPostIds = new Set()
 
 function displayName(user) {
   if (!user) {
@@ -51,6 +54,14 @@ function clearObject(object) {
   Object.keys(object).forEach((key) => {
     delete object[key]
   })
+}
+
+function unsubscribeAllPostRooms() {
+  for (const postId of subscribedPostIds) {
+    realtimeClient.unsubscribePost(postId)
+  }
+
+  subscribedPostIds.clear()
 }
 
 function ensureCommentState(postId) {
@@ -89,6 +100,7 @@ function ensureReplyForm(postId, commentId) {
 
 async function loadFeedData() {
   if (!isAuthenticated.value) {
+    unsubscribeAllPostRooms()
     posts.value = []
     suggestedUsers.value = []
     clearObject(expandedComments)
@@ -107,6 +119,7 @@ async function loadFeedData() {
   try {
     const [feedPosts, discoverUsers] = await Promise.all([fetchFeed(), fetchDiscoverUsers()])
 
+    unsubscribeAllPostRooms()
     posts.value = feedPosts
     suggestedUsers.value = discoverUsers
 
@@ -150,6 +163,14 @@ async function toggleComments(post) {
   ensureCommentState(post.id)
   expandedComments[post.id] = !expandedComments[post.id]
 
+  if (expandedComments[post.id]) {
+    realtimeClient.subscribePost(post.id)
+    subscribedPostIds.add(post.id)
+  } else {
+    realtimeClient.unsubscribePost(post.id)
+    subscribedPostIds.delete(post.id)
+  }
+
   if (expandedComments[post.id] && !commentsByPost[post.id].length && post.commentsCount >= 0) {
     await loadComments(post.id)
   }
@@ -179,25 +200,22 @@ async function submitComment(post, parentComment = null) {
       parentCommentId: parentComment?.id || ""
     })
 
-    if (parentComment) {
-      commentsByPost[post.id] = commentsByPost[post.id].map((item) =>
-        item.id === parentComment.id
-          ? { ...item, replies: [...(item.replies || []), comment] }
-          : item
-      )
+    const inserted = insertLiveComment(post.id, comment)
 
+    if (parentComment) {
       form.body = ""
       form.open = false
     } else {
-      commentsByPost[post.id] = [...commentsByPost[post.id], comment]
       form.body = ""
     }
 
-    posts.value = posts.value.map((item) =>
-      item.id === post.id
-        ? { ...item, commentsCount: (item.commentsCount || 0) + 1 }
-        : item
-    )
+    if (inserted) {
+      posts.value = posts.value.map((item) =>
+        item.id === post.id
+          ? { ...item, commentsCount: (item.commentsCount || 0) + 1 }
+          : item
+      )
+    }
     expandedComments[post.id] = true
   } catch (error) {
     if (isApiError(error)) {
@@ -255,6 +273,68 @@ function previousSlide(post) {
 function setSlide(post, index) {
   activeSlides[post.id] = index
 }
+
+function insertLiveComment(postId, comment) {
+  ensureCommentState(postId)
+
+  if (commentsByPost[postId].some((item) => item.id === comment.id)) {
+    return false
+  }
+
+  if (!comment.parentCommentId) {
+    commentsByPost[postId] = [...commentsByPost[postId], comment]
+    ensureReplyForm(postId, comment.id)
+    return true
+  }
+
+  let inserted = false
+  commentsByPost[postId] = commentsByPost[postId].map((item) => {
+    if (item.id !== comment.parentCommentId) {
+      return item
+    }
+
+    if ((item.replies || []).some((reply) => reply.id === comment.id)) {
+      return item
+    }
+
+    inserted = true
+    return {
+      ...item,
+      replies: [...(item.replies || []), comment]
+    }
+  })
+
+  return inserted
+}
+
+function handleLiveCommentEvent(event) {
+  const postId = event.payload?.postId
+  const comment = event.payload?.comment
+
+  if (!postId || !comment) {
+    return
+  }
+
+  if (!insertLiveComment(postId, comment)) {
+    return
+  }
+
+  posts.value = posts.value.map((item) =>
+    item.id === postId
+      ? { ...item, commentsCount: (item.commentsCount || 0) + 1 }
+      : item
+  )
+}
+
+removeRealtimeListeners.push(
+  realtimeClient.on("comment.created", handleLiveCommentEvent),
+  realtimeClient.on("comment.reply.created", handleLiveCommentEvent)
+)
+
+onBeforeUnmount(() => {
+  unsubscribeAllPostRooms()
+  removeRealtimeListeners.splice(0).forEach((dispose) => dispose())
+})
 
 watch(
   () => store.state.currentUser?.id,

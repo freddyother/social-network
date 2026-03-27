@@ -9,6 +9,7 @@ import (
 	"social-network/backend/internal/http/handlers"
 	"social-network/backend/internal/http/middleware"
 	"social-network/backend/internal/http/response"
+	"social-network/backend/internal/realtime"
 	"social-network/backend/internal/social"
 )
 
@@ -18,12 +19,16 @@ func NewRouter(cfg config.Config, db *sql.DB) stdlibhttp.Handler {
 	healthHandler := handlers.NewHealthHandler(db)
 	metaHandler := handlers.NewMetaHandler(cfg)
 	authService := auth.NewService(db, cfg.Session.TTL)
+	realtimeHub := realtime.NewHub()
+	socialService := social.NewService(db, cfg.UploadsDir, cfg.PublicBaseURL, realtimeHub)
+	realtimeHub.SetPostSubscriptionAuthorizer(socialService.CanViewPost)
 	authHandler := handlers.NewAuthHandler(authService, cfg.Session)
 	socialHandler := handlers.NewSocialHandler(
 		authService,
-		social.NewService(db, cfg.UploadsDir, cfg.PublicBaseURL),
+		socialService,
 		cfg.Session,
 	)
+	wsHandler := handlers.NewWebSocketHandler(authService, cfg.Session, cfg.CORS, realtimeHub)
 
 	mux.HandleFunc("GET /api/v1/health", healthHandler.Handle)
 	mux.HandleFunc("GET /api/v1/meta", metaHandler.Handle)
@@ -31,6 +36,7 @@ func NewRouter(cfg config.Config, db *sql.DB) stdlibhttp.Handler {
 	mux.HandleFunc("POST /api/v1/auth/login", authHandler.HandleLogin)
 	mux.HandleFunc("POST /api/v1/auth/logout", authHandler.HandleLogout)
 	mux.HandleFunc("GET /api/v1/auth/me", authHandler.HandleCurrentUser)
+	mux.HandleFunc("GET /api/v1/ws", wsHandler.HandleConnect)
 	mux.HandleFunc("GET /api/v1/posts", socialHandler.HandleFeed)
 	mux.HandleFunc("POST /api/v1/posts", socialHandler.HandleCreatePost)
 	mux.HandleFunc("GET /api/v1/posts/{postID}/comments", socialHandler.HandleComments)

@@ -104,9 +104,10 @@ type Service struct {
 	db            *sql.DB
 	uploadsDir    string
 	publicBaseURL string
+	publisher     EventPublisher
 }
 
-func NewService(db *sql.DB, uploadsDir, publicBaseURL string) Service {
+func NewService(db *sql.DB, uploadsDir, publicBaseURL string, publishers ...EventPublisher) Service {
 	trimmedBaseURL := strings.TrimRight(strings.TrimSpace(publicBaseURL), "/")
 	if trimmedBaseURL == "" {
 		trimmedBaseURL = "http://localhost:8080"
@@ -117,10 +118,16 @@ func NewService(db *sql.DB, uploadsDir, publicBaseURL string) Service {
 		trimmedUploadsDir = "./uploads"
 	}
 
+	publisher := EventPublisher(noopEventPublisher{})
+	if len(publishers) > 0 && publishers[0] != nil {
+		publisher = publishers[0]
+	}
+
 	return Service{
 		db:            db,
 		uploadsDir:    trimmedUploadsDir,
 		publicBaseURL: trimmedBaseURL,
+		publisher:     publisher,
 	}
 }
 
@@ -314,6 +321,11 @@ func (s Service) Feed(ctx context.Context, viewerID string) ([]Post, error) {
 	return posts, nil
 }
 
+func (s Service) CanViewPost(ctx context.Context, viewerID, postID string) bool {
+	_, err := s.loadVisiblePost(ctx, s.db, viewerID, postID)
+	return err == nil
+}
+
 func (s Service) DiscoverUsers(ctx context.Context, viewerID string) ([]SuggestedUser, error) {
 	rows, err := s.db.QueryContext(
 		ctx,
@@ -383,6 +395,9 @@ func (s Service) FollowUser(ctx context.Context, followerID, followeeID string) 
 		return FollowActionResult{}, ErrFollowYourself
 	}
 
+	var createdNotification Notification
+	var followRequestEvent FollowRequestEvent
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return FollowActionResult{}, fmt.Errorf("begin follow transaction: %w", err)
@@ -450,17 +465,18 @@ func (s Service) FollowUser(ctx context.Context, followerID, followeeID string) 
 		return FollowActionResult{Status: "following"}, nil
 	}
 
-	requestID, err := newToken(16)
-	if err != nil {
-		return FollowActionResult{}, fmt.Errorf("generate follow request id: %w", err)
-	}
-
 	followerIdentity, err := s.loadUserIdentity(ctx, tx, followerID)
 	if err != nil {
 		return FollowActionResult{}, err
 	}
 
-	if _, err = tx.ExecContext(
+	requestID, err := newToken(16)
+	if err != nil {
+		return FollowActionResult{}, fmt.Errorf("generate follow request id: %w", err)
+	}
+
+	var createdAt time.Time
+	if err = tx.QueryRowContext(
 		ctx,
 		`
 			INSERT INTO follow_requests (id, sender_id, recipient_id, status, created_at, responded_at)
@@ -470,15 +486,16 @@ func (s Service) FollowUser(ctx context.Context, followerID, followeeID string) 
 				status = 'pending',
 				responded_at = NULL,
 				created_at = NOW()
+			RETURNING id, created_at
 		`,
 		requestID,
 		followerID,
 		followeeID,
-	); err != nil {
+	).Scan(&followRequestEvent.RequestID, &createdAt); err != nil {
 		return FollowActionResult{}, fmt.Errorf("upsert follow request: %w", err)
 	}
 
-	if err = s.insertNotification(
+	createdNotification, err = s.insertNotification(
 		ctx,
 		tx,
 		followeeID,
@@ -487,12 +504,25 @@ func (s Service) FollowUser(ctx context.Context, followerID, followeeID string) 
 		fmt.Sprintf("%s wants to follow your private account.", followerIdentity.DisplayName()),
 		"user",
 		followerID,
-	); err != nil {
+	)
+	if err != nil {
 		return FollowActionResult{}, err
 	}
 
 	if err = tx.Commit(); err != nil {
 		return FollowActionResult{}, fmt.Errorf("commit follow transaction: %w", err)
+	}
+
+	followRequestEvent.SenderID = followerID
+	followRequestEvent.RecipientID = followeeID
+	followRequestEvent.Status = "pending"
+	followRequestEvent.CreatedAt = createdAt
+
+	s.publisher.PublishToUser(followeeID, "follow_request.created", followRequestEvent)
+	if createdNotification.ID != "" {
+		s.publisher.PublishToUser(followeeID, "notification.created", NotificationEvent{
+			Notification: createdNotification,
+		})
 	}
 
 	return FollowActionResult{Status: "requested"}, nil
@@ -555,6 +585,9 @@ func (s Service) IncomingFollowRequests(ctx context.Context, userID string) ([]F
 }
 
 func (s Service) RespondToFollowRequest(ctx context.Context, userID, requestID string, accept bool) error {
+	var createdNotification Notification
+	var acceptedEvent FollowRequestEvent
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin follow response transaction: %w", err)
@@ -609,7 +642,7 @@ func (s Service) RespondToFollowRequest(ctx context.Context, userID, requestID s
 			return identityErr
 		}
 
-		if err = s.insertNotification(
+		createdNotification, err = s.insertNotification(
 			ctx,
 			tx,
 			senderID,
@@ -618,8 +651,16 @@ func (s Service) RespondToFollowRequest(ctx context.Context, userID, requestID s
 			fmt.Sprintf("%s accepted your follow request.", recipientIdentity.DisplayName()),
 			"user",
 			userID,
-		); err != nil {
+		)
+		if err != nil {
 			return err
+		}
+
+		acceptedEvent = FollowRequestEvent{
+			RequestID:   requestID,
+			SenderID:    senderID,
+			RecipientID: userID,
+			Status:      "accepted",
 		}
 	}
 
@@ -638,6 +679,15 @@ func (s Service) RespondToFollowRequest(ctx context.Context, userID, requestID s
 
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("commit follow response transaction: %w", err)
+	}
+
+	if accept {
+		s.publisher.PublishToUser(senderID, "follow_request.accepted", acceptedEvent)
+		if createdNotification.ID != "" {
+			s.publisher.PublishToUser(senderID, "notification.created", NotificationEvent{
+				Notification: createdNotification,
+			})
+		}
 	}
 
 	return nil

@@ -174,6 +174,8 @@ func (s Service) CreateComment(ctx context.Context, author auth.User, postID str
 		return Comment{}, err
 	}
 
+	deliveries := make([]notificationDelivery, 0, 2)
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Comment{}, fmt.Errorf("begin create comment transaction: %w", err)
@@ -251,7 +253,7 @@ func (s Service) CreateComment(ctx context.Context, author auth.User, postID str
 	actorName := displayNameFromAuthUser(author)
 	if normalizedInput.ParentCommentID == "" {
 		if post.AuthorID != author.ID {
-			if err = s.insertNotification(
+			createdNotification, notificationErr := s.insertNotification(
 				ctx,
 				tx,
 				post.AuthorID,
@@ -260,13 +262,18 @@ func (s Service) CreateComment(ctx context.Context, author auth.User, postID str
 				fmt.Sprintf("%s commented on \"%s\".", actorName, post.Title),
 				"post",
 				postID,
-			); err != nil {
-				return Comment{}, err
+			)
+			if notificationErr != nil {
+				return Comment{}, notificationErr
 			}
+			deliveries = append(deliveries, notificationDelivery{
+				UserID:       post.AuthorID,
+				Notification: createdNotification,
+			})
 		}
 	} else {
 		if replyTargetAuthorID != "" && replyTargetAuthorID != author.ID {
-			if err = s.insertNotification(
+			createdNotification, notificationErr := s.insertNotification(
 				ctx,
 				tx,
 				replyTargetAuthorID,
@@ -275,13 +282,18 @@ func (s Service) CreateComment(ctx context.Context, author auth.User, postID str
 				fmt.Sprintf("%s replied to you on \"%s\".", actorName, post.Title),
 				"post",
 				postID,
-			); err != nil {
-				return Comment{}, err
+			)
+			if notificationErr != nil {
+				return Comment{}, notificationErr
 			}
+			deliveries = append(deliveries, notificationDelivery{
+				UserID:       replyTargetAuthorID,
+				Notification: createdNotification,
+			})
 		}
 
 		if post.AuthorID != author.ID && post.AuthorID != replyTargetAuthorID {
-			if err = s.insertNotification(
+			createdNotification, notificationErr := s.insertNotification(
 				ctx,
 				tx,
 				post.AuthorID,
@@ -290,9 +302,14 @@ func (s Service) CreateComment(ctx context.Context, author auth.User, postID str
 				fmt.Sprintf("%s commented on \"%s\".", actorName, post.Title),
 				"post",
 				postID,
-			); err != nil {
-				return Comment{}, err
+			)
+			if notificationErr != nil {
+				return Comment{}, notificationErr
 			}
+			deliveries = append(deliveries, notificationDelivery{
+				UserID:       post.AuthorID,
+				Notification: createdNotification,
+			})
 		}
 	}
 
@@ -300,7 +317,7 @@ func (s Service) CreateComment(ctx context.Context, author auth.User, postID str
 		return Comment{}, fmt.Errorf("commit create comment transaction: %w", err)
 	}
 
-	return Comment{
+	comment := Comment{
 		ID:              commentID,
 		Body:            normalizedInput.Body,
 		CreatedAt:       createdAt,
@@ -315,7 +332,29 @@ func (s Service) CreateComment(ctx context.Context, author auth.User, postID str
 			ProfileVisibility: author.ProfileVisibility,
 		},
 		Replies: []Comment{},
-	}, nil
+	}
+
+	eventType := "comment.created"
+	if comment.Depth > 0 {
+		eventType = "comment.reply.created"
+	}
+
+	s.publisher.PublishToPost(postID, eventType, CommentEvent{
+		PostID:  postID,
+		Comment: comment,
+	})
+
+	for _, delivery := range deliveries {
+		if delivery.Notification.ID == "" {
+			continue
+		}
+
+		s.publisher.PublishToUser(delivery.UserID, "notification.created", NotificationEvent{
+			Notification: delivery.Notification,
+		})
+	}
+
+	return comment, nil
 }
 
 func (s Service) Notifications(ctx context.Context, userID string) ([]Notification, error) {
@@ -388,6 +427,10 @@ func (s Service) MarkNotificationRead(ctx context.Context, userID, notificationI
 	if rowsAffected == 0 {
 		return ErrNotFound
 	}
+
+	s.publisher.PublishToUser(userID, "notification.read", NotificationReadEvent{
+		NotificationID: notificationID,
+	})
 
 	return nil
 }
@@ -512,14 +555,14 @@ func (s Service) loadUserIdentity(ctx context.Context, reader sqlReader, userID 
 	return user, nil
 }
 
-func (s Service) insertNotification(ctx context.Context, executor sqlExecutor, userID, notificationType, title, body, entityType, entityID string) error {
+func (s Service) insertNotification(ctx context.Context, executor sqlExecutor, userID, notificationType, title, body, entityType, entityID string) (Notification, error) {
 	if strings.TrimSpace(userID) == "" {
-		return nil
+		return Notification{}, nil
 	}
 
 	notificationID, err := newToken(16)
 	if err != nil {
-		return fmt.Errorf("generate notification id: %w", err)
+		return Notification{}, fmt.Errorf("generate notification id: %w", err)
 	}
 
 	var entityTypeValue any
@@ -532,11 +575,13 @@ func (s Service) insertNotification(ctx context.Context, executor sqlExecutor, u
 		entityIDValue = trimmed
 	}
 
-	if _, err := executor.ExecContext(
+	var createdAt time.Time
+	if err := executor.QueryRowContext(
 		ctx,
 		`
 			INSERT INTO notifications (id, user_id, type, title, body, entity_type, entity_id, is_read, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE, NOW())
+			RETURNING created_at
 		`,
 		notificationID,
 		userID,
@@ -545,11 +590,20 @@ func (s Service) insertNotification(ctx context.Context, executor sqlExecutor, u
 		body,
 		entityTypeValue,
 		entityIDValue,
-	); err != nil {
-		return fmt.Errorf("insert notification: %w", err)
+	).Scan(&createdAt); err != nil {
+		return Notification{}, fmt.Errorf("insert notification: %w", err)
 	}
 
-	return nil
+	return Notification{
+		ID:         notificationID,
+		Type:       notificationType,
+		Title:      title,
+		Body:       body,
+		EntityType: strings.TrimSpace(entityType),
+		EntityID:   strings.TrimSpace(entityID),
+		IsRead:     false,
+		CreatedAt:  createdAt,
+	}, nil
 }
 
 func normalizeCreateCommentInput(input CreateCommentInput) (CreateCommentInput, error) {
