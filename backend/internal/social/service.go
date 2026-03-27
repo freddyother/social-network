@@ -7,9 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"mime/multipart"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,11 +17,15 @@ import (
 	"github.com/lib/pq"
 
 	"social-network/backend/internal/auth"
+	uploadmedia "social-network/backend/internal/media"
 )
 
 const (
-	maxPostImages    = 6
-	maxImageFileSize = 10 << 20
+	maxPostImages         = 6
+	maxImageFileSize      = 10 << 20
+	maxPostImageDimension = 1600
+	maxAvatarDimension    = 768
+	jpegQuality           = 86
 )
 
 var (
@@ -105,6 +107,10 @@ type Service struct {
 	uploadsDir    string
 	publicBaseURL string
 	publisher     EventPublisher
+}
+
+type AvatarUploadInput struct {
+	Avatar *multipart.FileHeader
 }
 
 func NewService(db *sql.DB, uploadsDir, publicBaseURL string, publishers ...EventPublisher) Service {
@@ -777,6 +783,77 @@ func (s Service) UpdateThemePreference(ctx context.Context, userID, themePrefere
 	return user, nil
 }
 
+func (s Service) UpdateAvatar(ctx context.Context, userID string, input AvatarUploadInput) (auth.User, error) {
+	if input.Avatar == nil {
+		return auth.User{}, &ValidationError{
+			Message: "Choose an image to use as your profile photo.",
+			Fields: map[string]string{
+				"avatar": "Choose an image to use as your profile photo.",
+			},
+		}
+	}
+
+	avatarID, err := newToken(16)
+	if err != nil {
+		return auth.User{}, fmt.Errorf("generate avatar id: %w", err)
+	}
+
+	fileBaseName := "avatar-" + avatarID[:12]
+	relativePrefix := filepath.ToSlash(filepath.Join("avatars", userID, fileBaseName))
+	absolutePrefix := filepath.Join(s.uploadsDir, filepath.FromSlash(relativePrefix))
+
+	result, err := uploadmedia.OptimizeAndSaveUpload(input.Avatar, absolutePrefix, uploadmedia.OptimizeOptions{
+		MaxBytes:    maxImageFileSize,
+		MaxWidth:    maxAvatarDimension,
+		MaxHeight:   maxAvatarDimension,
+		JPEGQuality: jpegQuality,
+	})
+	if err != nil {
+		return auth.User{}, wrapImageUploadError(err, "avatar")
+	}
+
+	relativePath := relativePrefix + result.Extension
+	absolutePath := filepath.Join(s.uploadsDir, filepath.FromSlash(relativePath))
+
+	row := s.db.QueryRowContext(
+		ctx,
+		`
+			UPDATE users
+			SET avatar_url = $1, updated_at = NOW()
+			WHERE id = $2
+			RETURNING
+				id,
+				email,
+				first_name,
+				last_name,
+				date_of_birth,
+				avatar_url,
+				nickname,
+				about_me,
+				profile_visibility,
+				theme_preference,
+				created_at,
+				updated_at
+		`,
+		relativePath,
+		userID,
+	)
+
+	user, err := scanAuthUser(row)
+	if err != nil {
+		_ = os.Remove(absolutePath)
+		if errors.Is(err, sql.ErrNoRows) {
+			return auth.User{}, ErrNotFound
+		}
+
+		return auth.User{}, fmt.Errorf("update profile avatar: %w", err)
+	}
+
+	s.cleanupAvatarDir(userID, filepath.Base(relativePath))
+	user.AvatarURL = s.publicURL(relativePath)
+	return user, nil
+}
+
 func (s Service) loadPostMedia(ctx context.Context, postIDs []string) (map[string][]PostMedia, error) {
 	mediaByPostID := make(map[string][]PostMedia, len(postIDs))
 	if len(postIDs) == 0 {
@@ -833,50 +910,26 @@ func (s Service) savePostMedia(postID string, images []*multipart.FileHeader) ([
 
 	media := make([]savedMedia, 0, len(images))
 	for index, header := range images {
-		if header.Size > maxImageFileSize {
-			return nil, &ValidationError{
-				Message: "Each image must be 10 MB or smaller.",
-				Fields: map[string]string{
-					"images": "Each image must be 10 MB or smaller.",
-				},
-			}
-		}
-
-		file, err := header.Open()
-		if err != nil {
-			return nil, fmt.Errorf("open uploaded image: %w", err)
-		}
-
-		extension, err := imageExtension(file)
-		if closeErr := file.Close(); closeErr != nil && err == nil {
-			err = closeErr
-		}
-		if err != nil {
-			return nil, err
-		}
-
 		mediaID, err := newToken(16)
 		if err != nil {
 			return nil, fmt.Errorf("generate media id: %w", err)
 		}
 
-		fileName := fmt.Sprintf("%02d-%s%s", index+1, mediaID[:12], extension)
-		relativePath := filepath.ToSlash(filepath.Join("posts", postID, fileName))
-		absolutePath := filepath.Join(s.uploadsDir, relativePath)
+		fileBaseName := fmt.Sprintf("%02d-%s", index+1, mediaID[:12])
+		relativePrefix := filepath.ToSlash(filepath.Join("posts", postID, fileBaseName))
+		absolutePrefix := filepath.Join(s.uploadsDir, filepath.FromSlash(relativePrefix))
 
-		sourceFile, err := header.Open()
+		result, err := uploadmedia.OptimizeAndSaveUpload(header, absolutePrefix, uploadmedia.OptimizeOptions{
+			MaxBytes:    maxImageFileSize,
+			MaxWidth:    maxPostImageDimension,
+			MaxHeight:   maxPostImageDimension,
+			JPEGQuality: jpegQuality,
+		})
 		if err != nil {
-			return nil, fmt.Errorf("reopen uploaded image: %w", err)
+			return nil, wrapImageUploadError(err, "images")
 		}
 
-		if err := copyFile(absolutePath, sourceFile); err != nil {
-			_ = sourceFile.Close()
-			return nil, err
-		}
-
-		if err := sourceFile.Close(); err != nil {
-			return nil, fmt.Errorf("close uploaded image: %w", err)
-		}
+		relativePath := relativePrefix + result.Extension
 
 		media = append(media, savedMedia{
 			ID:          mediaID,
@@ -992,49 +1045,41 @@ func normalizeThemePreference(themePreference string) (string, error) {
 	}
 }
 
-func imageExtension(file multipart.File) (string, error) {
-	sniffBuffer := make([]byte, 512)
-	bytesRead, err := file.Read(sniffBuffer)
-	if err != nil && !errors.Is(err, io.EOF) {
-		return "", fmt.Errorf("read uploaded image: %w", err)
-	}
-
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return "", fmt.Errorf("rewind uploaded image: %w", err)
-	}
-
-	contentType := http.DetectContentType(sniffBuffer[:bytesRead])
-	switch contentType {
-	case "image/jpeg":
-		return ".jpg", nil
-	case "image/png":
-		return ".png", nil
-	case "image/webp":
-		return ".webp", nil
-	case "image/gif":
-		return ".gif", nil
-	default:
-		return "", &ValidationError{
-			Message: "Only JPG, PNG, GIF, and WebP images are supported.",
+func wrapImageUploadError(err error, field string) error {
+	switch {
+	case errors.Is(err, uploadmedia.ErrFileTooLarge):
+		return &ValidationError{
+			Message: "Each image must be 10 MB or smaller.",
 			Fields: map[string]string{
-				"images": "Only JPG, PNG, GIF, and WebP images are supported.",
+				field: "Each image must be 10 MB or smaller.",
 			},
 		}
+	case errors.Is(err, uploadmedia.ErrUnsupportedFormat):
+		return &ValidationError{
+			Message: "Only JPG, PNG, GIF, and WebP images are supported.",
+			Fields: map[string]string{
+				field: "Only JPG, PNG, GIF, and WebP images are supported.",
+			},
+		}
+	default:
+		return err
 	}
 }
 
-func copyFile(destinationPath string, source multipart.File) error {
-	destination, err := os.Create(destinationPath)
+func (s Service) cleanupAvatarDir(userID, keepFile string) {
+	avatarDir := filepath.Join(s.uploadsDir, "avatars", userID)
+	entries, err := os.ReadDir(avatarDir)
 	if err != nil {
-		return fmt.Errorf("create destination image: %w", err)
-	}
-	defer destination.Close()
-
-	if _, err := io.Copy(destination, source); err != nil {
-		return fmt.Errorf("copy uploaded image: %w", err)
+		return
 	}
 
-	return nil
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Name() == keepFile {
+			continue
+		}
+
+		_ = os.Remove(filepath.Join(avatarDir, entry.Name()))
+	}
 }
 
 func newToken(size int) (string, error) {

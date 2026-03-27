@@ -390,6 +390,18 @@ select {
   align-items: center;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .shell__main,
 .page {
   display: grid;
@@ -753,18 +765,60 @@ label {
   color: var(--muted);
 }
 
+.user-avatar {
+  display: inline-grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--accent-soft), var(--ghost-bg));
+  flex-shrink: 0;
+}
+
+.user-avatar--small {
+  width: 46px;
+  height: 46px;
+}
+
+.user-avatar--profile {
+  width: 116px;
+  height: 116px;
+  box-shadow: 0 18px 36px var(--panel-shadow);
+}
+
+.user-avatar__image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.user-avatar__fallback {
+  color: var(--ink);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.user-avatar--small .user-avatar__fallback {
+  font-size: 0.92rem;
+}
+
+.user-avatar--profile .user-avatar__fallback {
+  font-size: 1.4rem;
+}
+
 .shell__user-chip {
-  display: grid;
-  gap: 0.1rem;
-  padding: 0.75rem 1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.55rem 0.85rem;
   border: 1px solid var(--line);
   border-radius: 18px;
   background: var(--ghost-bg);
 }
 
-.shell__user-chip span {
-  font-size: 0.85rem;
-  color: var(--muted);
+.shell__user-name {
+  font-size: 1rem;
 }
 
 .create-post-panel {
@@ -894,6 +948,24 @@ textarea::placeholder {
   font-size: 0.92rem;
 }
 
+.profile-hero__body {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 1.35rem;
+  align-items: center;
+}
+
+.profile-hero__avatar-column {
+  display: grid;
+  gap: 0.85rem;
+  justify-items: start;
+}
+
+.profile-hero__content {
+  display: grid;
+  gap: 0.5rem;
+}
+
 @media (max-width: 980px) {
   .shell {
     grid-template-columns: 1fr;
@@ -934,6 +1006,14 @@ textarea::placeholder {
   .shell__header-logo {
     width: min(320px, 100%);
     height: 96px;
+  }
+
+  .profile-hero__body {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-hero__avatar-column {
+    justify-items: center;
   }
 
   .shell__icon-rail {

@@ -1,4 +1,5 @@
 export const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8080/api/v1").replace(/\/$/, "")
+const uploadsBaseUrl = apiBaseUrl.replace(/\/api\/v\d+$/, "")
 
 export class ApiError extends Error {
   constructor(message, status, payload) {
@@ -12,6 +13,30 @@ export class ApiError extends Error {
 function buildUrl(path) {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`
   return `${apiBaseUrl}${normalizedPath}`
+}
+
+function resolveUploadUrl(path) {
+  if (!path) {
+    return ""
+  }
+
+  if (/^https?:\/\//i.test(path)) {
+    return path
+  }
+
+  const normalizedPath = path.replace(/^\/+/, "")
+  return `${uploadsBaseUrl}/uploads/${normalizedPath}`
+}
+
+function normalizeUser(user) {
+  if (!user) {
+    return null
+  }
+
+  return {
+    ...user,
+    avatarUrl: resolveUploadUrl(user.avatarUrl)
+  }
 }
 
 async function request(path, options = {}) {
@@ -63,7 +88,7 @@ export function fetchMeta() {
 
 export async function fetchCurrentUser() {
   const payload = await request("/auth/me", { method: "GET" })
-  return payload?.user || null
+  return normalizeUser(payload?.user || null)
 }
 
 export async function loginUser(credentials) {
@@ -72,7 +97,7 @@ export async function loginUser(credentials) {
     body: JSON.stringify(credentials)
   })
 
-  return payload?.user || null
+  return normalizeUser(payload?.user || null)
 }
 
 export async function registerUser(details) {
@@ -81,7 +106,7 @@ export async function registerUser(details) {
     body: JSON.stringify(details)
   })
 
-  return payload?.user || null
+  return normalizeUser(payload?.user || null)
 }
 
 export function logoutUser() {
@@ -153,7 +178,7 @@ export async function updateProfileVisibility(visibility) {
     body: JSON.stringify({ visibility })
   })
 
-  return payload?.user || null
+  return normalizeUser(payload?.user || null)
 }
 
 export async function updateThemePreference(themePreference) {
@@ -162,7 +187,19 @@ export async function updateThemePreference(themePreference) {
     body: JSON.stringify({ themePreference })
   })
 
-  return payload?.user || null
+  return normalizeUser(payload?.user || null)
+}
+
+export async function uploadProfileAvatar(file) {
+  const formData = new FormData()
+  formData.set("avatar", file)
+
+  const payload = await request("/users/me/avatar", {
+    method: "POST",
+    body: formData
+  })
+
+  return normalizeUser(payload?.user || null)
 }
 
 export async function fetchNotifications() {

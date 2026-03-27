@@ -39,6 +39,7 @@ func NewRouter(cfg config.Config, db *sql.DB) stdlibhttp.Handler {
 	mux.HandleFunc("GET /api/v1/ws", wsHandler.HandleConnect)
 	mux.HandleFunc("GET /api/v1/posts", socialHandler.HandleFeed)
 	mux.HandleFunc("POST /api/v1/posts", socialHandler.HandleCreatePost)
+	mux.HandleFunc("POST /api/v1/users/me/avatar", socialHandler.HandleUpdateAvatar)
 	mux.HandleFunc("GET /api/v1/posts/{postID}/comments", socialHandler.HandleComments)
 	mux.HandleFunc("POST /api/v1/posts/{postID}/comments", socialHandler.HandleCreateComment)
 	mux.HandleFunc("GET /api/v1/users/discover", socialHandler.HandleDiscoverUsers)

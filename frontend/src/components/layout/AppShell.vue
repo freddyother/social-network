@@ -63,6 +63,20 @@ const currentUserName = computed(() => {
 
   return user.nickname || `${user.firstName} ${user.lastName}`.trim() || user.email
 })
+const currentUserInitials = computed(() => {
+  const user = store.state.currentUser
+  if (!user) {
+    return "N"
+  }
+
+  const source = user.nickname || `${user.firstName} ${user.lastName}`.trim() || user.email || "NEXO"
+  return source
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || "")
+    .join("") || "N"
+})
 
 function isActive(item) {
   return route.path === item.to || route.path.startsWith(`${item.to}/`)
@@ -215,8 +229,16 @@ watch(
         <div class="shell__header-actions">
           <template v-if="isAuthenticated">
             <RouterLink to="/profile/me" class="shell__user-chip">
-              <strong>{{ currentUserName }}</strong>
-              <span>{{ store.state.currentUser.email }}</span>
+              <span class="user-avatar user-avatar--small">
+                <img
+                  v-if="store.state.currentUser.avatarUrl"
+                  :src="store.state.currentUser.avatarUrl"
+                  :alt="`${currentUserName} avatar`"
+                  class="user-avatar__image"
+                />
+                <span v-else class="user-avatar__fallback">{{ currentUserInitials }}</span>
+              </span>
+              <strong class="shell__user-name">{{ currentUserName }}</strong>
             </RouterLink>
             <button
               type="button"

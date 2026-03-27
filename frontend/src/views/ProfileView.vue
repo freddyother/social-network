@@ -6,6 +6,7 @@ import {
   declineFollowRequest,
   fetchFollowRequests,
   isApiError,
+  uploadProfileAvatar,
   updateProfileVisibility,
   updateThemePreference
 } from "../services/api"
@@ -37,15 +38,32 @@ const privacyForm = reactive({
 
 const themeOptions = THEME_OPTIONS
 const requests = ref([])
+const avatarInput = ref(null)
 const profileError = ref("")
 const requestError = ref("")
 const themeError = ref("")
+const avatarError = ref("")
+const isUploadingAvatar = ref(false)
 const isSavingPrivacy = ref(false)
 const isSavingTheme = ref("")
 const loadingRequests = ref(false)
 const requestLoading = reactive({})
 const removeRealtimeListeners = []
 const activeThemePreference = computed(() => currentProfile.value?.themePreference || store.state.themePreference)
+const profileInitials = computed(() => {
+  const user = currentProfile.value
+  if (!user) {
+    return "N"
+  }
+
+  const source = user.nickname || `${user.firstName} ${user.lastName}`.trim() || user.email || "NEXO"
+  return source
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || "")
+    .join("") || "N"
+})
 
 function loadPrivacyValue() {
   privacyForm.visibility = currentProfile.value?.profileVisibility || "public"
@@ -88,6 +106,36 @@ async function saveProfileVisibility() {
     }
   } finally {
     isSavingPrivacy.value = false
+  }
+}
+
+function openAvatarPicker() {
+  avatarInput.value?.click()
+}
+
+async function handleAvatarChange(event) {
+  const [file] = Array.from(event.target?.files || [])
+  if (!file || !currentProfile.value) {
+    return
+  }
+
+  isUploadingAvatar.value = true
+  avatarError.value = ""
+
+  try {
+    const updatedUser = await uploadProfileAvatar(file)
+    store.setCurrentUser(updatedUser)
+  } catch (error) {
+    if (isApiError(error)) {
+      avatarError.value = error.message
+    } else {
+      avatarError.value = "Could not upload your profile photo."
+    }
+  } finally {
+    isUploadingAvatar.value = false
+    if (event.target) {
+      event.target.value = ""
+    }
   }
 }
 
@@ -178,13 +226,46 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="page">
-    <div class="panel">
+    <div class="panel profile-hero">
       <p class="eyebrow">Profile</p>
       <template v-if="currentProfile">
-        <h2>{{ profileName }}</h2>
-        <p>
-          Signed in as {{ currentProfile.email }} with a {{ currentProfile.profileVisibility }} profile.
-        </p>
+        <div class="profile-hero__body">
+          <div class="profile-hero__avatar-column">
+            <div class="user-avatar user-avatar--profile">
+              <img
+                v-if="currentProfile.avatarUrl"
+                :src="currentProfile.avatarUrl"
+                :alt="`${profileName} profile photo`"
+                class="user-avatar__image"
+              />
+              <span v-else class="user-avatar__fallback">{{ profileInitials }}</span>
+            </div>
+            <input
+              ref="avatarInput"
+              class="visually-hidden"
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              @change="handleAvatarChange"
+            />
+            <button
+              type="button"
+              class="button button--ghost button--small"
+              :disabled="isUploadingAvatar"
+              @click="openAvatarPicker"
+            >
+              {{ isUploadingAvatar ? "Uploading..." : currentProfile.avatarUrl ? "Change photo" : "Add photo" }}
+            </button>
+            <p class="feed-note">Images are optimized automatically when uploaded.</p>
+            <p v-if="avatarError" class="form-error">{{ avatarError }}</p>
+          </div>
+
+          <div class="profile-hero__content">
+            <h2>{{ profileName }}</h2>
+            <p>
+              Signed in as {{ currentProfile.email }} with a {{ currentProfile.profileVisibility }} profile.
+            </p>
+          </div>
+        </div>
       </template>
       <template v-else>
         <h2>{{ props.handle }}'s profile</h2>

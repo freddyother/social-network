@@ -24,6 +24,7 @@ type socialService interface {
 	RespondToFollowRequest(ctx context.Context, userID, requestID string, accept bool) error
 	UpdateProfileVisibility(ctx context.Context, userID, visibility string) (auth.User, error)
 	UpdateThemePreference(ctx context.Context, userID, themePreference string) (auth.User, error)
+	UpdateAvatar(ctx context.Context, userID string, input social.AvatarUploadInput) (auth.User, error)
 	Notifications(ctx context.Context, userID string) ([]social.Notification, error)
 	MarkNotificationRead(ctx context.Context, userID, notificationID string) error
 }
@@ -88,6 +89,38 @@ func (h SocialHandler) HandleCreatePost(w stdlibhttp.ResponseWriter, r *stdlibht
 
 	response.JSON(w, stdlibhttp.StatusCreated, map[string]any{
 		"post": post,
+	})
+}
+
+func (h SocialHandler) HandleUpdateAvatar(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	currentUser, ok := h.requireCurrentUser(w, r)
+	if !ok {
+		return
+	}
+
+	if err := r.ParseMultipartForm(16 << 20); err != nil {
+		writeError(w, stdlibhttp.StatusBadRequest, "Avatar form data is invalid.", nil)
+		return
+	}
+
+	var avatar *multipart.FileHeader
+	if r.MultipartForm != nil {
+		files := r.MultipartForm.File["avatar"]
+		if len(files) > 0 {
+			avatar = files[0]
+		}
+	}
+
+	user, err := h.service.UpdateAvatar(r.Context(), currentUser.ID, social.AvatarUploadInput{
+		Avatar: avatar,
+	})
+	if err != nil {
+		h.handleSocialError(w, err)
+		return
+	}
+
+	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
+		"user": user,
 	})
 }
 
