@@ -12,7 +12,7 @@ import {
 } from "../services/api"
 import { realtimeClient } from "../services/realtime"
 import { useAppStore } from "../stores/app"
-import { formatDateTime } from "../utils/date"
+import { formatDate as formatAppDate } from "../utils/date"
 
 const store = useAppStore()
 const route = useRoute()
@@ -43,7 +43,7 @@ function displayName(user) {
 }
 
 function formatDate(value) {
-  return formatDateTime(value)
+  return formatAppDate(value)
 }
 
 function commentCountLabel(count) {

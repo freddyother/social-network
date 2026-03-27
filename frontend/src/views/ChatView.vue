@@ -12,7 +12,7 @@ import {
 } from "../services/api"
 import { realtimeClient } from "../services/realtime"
 import { useAppStore } from "../stores/app"
-import { formatDate, formatDateTime, formatTime } from "../utils/date"
+import { formatDate as formatAppDate, formatTime } from "../utils/date"
 
 const store = useAppStore()
 const route = useRoute()
@@ -102,7 +102,7 @@ function conversationPreview(message) {
 }
 
 function formatConversationTime(value) {
-  return formatDateTime(value)
+  return formatAppDate(value)
 }
 
 function formatMessageTime(value) {
@@ -110,7 +110,7 @@ function formatMessageTime(value) {
 }
 
 function formatMessageDay(value) {
-  return formatDate(value)
+  return formatAppDate(value)
 }
 
 function dayKey(value) {
