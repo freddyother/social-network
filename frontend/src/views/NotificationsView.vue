@@ -133,7 +133,7 @@ onBeforeUnmount(() => {
         </article>
         <article class="panel">
           <h3>What appears here</h3>
-          <p>Private follow requests, approvals, fresh comments on your posts, and direct replies to your comments.</p>
+          <p>Private messages, follow requests, approvals, fresh comments on your posts, and direct replies to your comments.</p>
         </article>
       </div>
 
@@ -168,6 +168,13 @@ onBeforeUnmount(() => {
                 class="notification-card__link"
               >
                 Open feed
+              </RouterLink>
+              <RouterLink
+                v-else-if="notification.entityType === 'conversation' && notification.entityId"
+                :to="{ path: '/chat', query: { user: notification.entityId } }"
+                class="notification-card__link"
+              >
+                Open chat
               </RouterLink>
             </div>
 

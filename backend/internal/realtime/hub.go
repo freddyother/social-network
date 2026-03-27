@@ -22,6 +22,9 @@ type Hub struct {
 	userClients        map[string]map[*Client]struct{}
 	postClients        map[string]map[*Client]struct{}
 	postSubscriptionOK func(ctx context.Context, userID, postID string) bool
+	messageDelivered   func(ctx context.Context, userID, messageID string)
+	conversationRead   func(ctx context.Context, userID, conversationUserID string)
+	chatHistory        func(ctx context.Context, userID, conversationUserID, beforeMessageID string, limit int) (any, error)
 }
 
 type Client struct {
@@ -30,14 +33,20 @@ type Client struct {
 	userID            string
 	send              chan []byte
 	postSubscriptions map[string]struct{}
+	activeChatUserID  string
 	mu                sync.RWMutex
 	closeOnce         sync.Once
 	closed            bool
 }
 
 type inboundCommand struct {
-	Type   string `json:"type"`
-	PostID string `json:"postId,omitempty"`
+	Type               string `json:"type"`
+	PostID             string `json:"postId,omitempty"`
+	MessageID          string `json:"messageId,omitempty"`
+	ConversationUserID string `json:"conversationUserId,omitempty"`
+	BeforeMessageID    string `json:"beforeMessageId,omitempty"`
+	RequestID          string `json:"requestId,omitempty"`
+	Limit              int    `json:"limit,omitempty"`
 }
 
 type outboundMessage struct {
@@ -58,6 +67,27 @@ func (h *Hub) SetPostSubscriptionAuthorizer(authorizer func(ctx context.Context,
 	defer h.mu.Unlock()
 
 	h.postSubscriptionOK = authorizer
+}
+
+func (h *Hub) SetMessageDeliveredHandler(handler func(ctx context.Context, userID, messageID string)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.messageDelivered = handler
+}
+
+func (h *Hub) SetConversationReadHandler(handler func(ctx context.Context, userID, conversationUserID string)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.conversationRead = handler
+}
+
+func (h *Hub) SetChatHistoryHandler(handler func(ctx context.Context, userID, conversationUserID, beforeMessageID string, limit int) (any, error)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.chatHistory = handler
 }
 
 func (h *Hub) ServeConn(userID string, conn *websocket.Conn) {
@@ -241,6 +271,16 @@ func (c *Client) readPump() {
 			c.hub.subscribeClientToPost(c, command.PostID)
 		case "unsubscribe.post":
 			c.hub.unsubscribeClientFromPost(c, command.PostID)
+		case "ack.chat.delivered":
+			c.hub.handleDeliveredAck(c.userID, command.MessageID)
+		case "ack.chat.read":
+			c.hub.handleConversationRead(c.userID, command.ConversationUserID)
+		case "chat.view":
+			c.setActiveChatUser(command.ConversationUserID)
+		case "chat.leave":
+			c.setActiveChatUser("")
+		case "chat.history":
+			c.hub.handleChatHistory(c, command)
 		}
 	}
 }
@@ -312,6 +352,20 @@ func (c *Client) shutdown() {
 	})
 }
 
+func (c *Client) setActiveChatUser(conversationUserID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.activeChatUserID = strings.TrimSpace(conversationUserID)
+}
+
+func (c *Client) activeChatUser() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.activeChatUserID
+}
+
 func (h *Hub) canSubscribeToPost(userID, postID string) bool {
 	h.mu.RLock()
 	authorizer := h.postSubscriptionOK
@@ -322,4 +376,93 @@ func (h *Hub) canSubscribeToPost(userID, postID string) bool {
 	}
 
 	return authorizer(context.Background(), strings.TrimSpace(userID), strings.TrimSpace(postID))
+}
+
+func (h *Hub) HasUserConnection(userID string) bool {
+	trimmedUserID := strings.TrimSpace(userID)
+	if trimmedUserID == "" {
+		return false
+	}
+
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	return len(h.userClients[trimmedUserID]) > 0
+}
+
+func (h *Hub) IsViewingConversation(userID, conversationUserID string) bool {
+	trimmedUserID := strings.TrimSpace(userID)
+	trimmedConversationUserID := strings.TrimSpace(conversationUserID)
+	if trimmedUserID == "" || trimmedConversationUserID == "" {
+		return false
+	}
+
+	h.mu.RLock()
+	clients := h.snapshotClients(h.userClients[trimmedUserID])
+	h.mu.RUnlock()
+
+	for _, client := range clients {
+		if client.activeChatUser() == trimmedConversationUserID {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (h *Hub) handleDeliveredAck(userID, messageID string) {
+	h.mu.RLock()
+	handler := h.messageDelivered
+	h.mu.RUnlock()
+
+	if handler == nil {
+		return
+	}
+
+	go handler(context.Background(), strings.TrimSpace(userID), strings.TrimSpace(messageID))
+}
+
+func (h *Hub) handleConversationRead(userID, conversationUserID string) {
+	h.mu.RLock()
+	handler := h.conversationRead
+	h.mu.RUnlock()
+
+	if handler == nil {
+		return
+	}
+
+	go handler(context.Background(), strings.TrimSpace(userID), strings.TrimSpace(conversationUserID))
+}
+
+func (h *Hub) handleChatHistory(client *Client, command inboundCommand) {
+	h.mu.RLock()
+	handler := h.chatHistory
+	h.mu.RUnlock()
+
+	if handler == nil {
+		return
+	}
+
+	go func() {
+		payload, err := handler(
+			context.Background(),
+			strings.TrimSpace(client.userID),
+			strings.TrimSpace(command.ConversationUserID),
+			strings.TrimSpace(command.BeforeMessageID),
+			command.Limit,
+		)
+		if err != nil {
+			_ = client.enqueueMessage("chat.history.error", map[string]any{
+				"requestId":          strings.TrimSpace(command.RequestID),
+				"conversationUserId": strings.TrimSpace(command.ConversationUserID),
+				"message":            "Could not load chat history.",
+			})
+			return
+		}
+
+		_ = client.enqueueMessage("chat.history.loaded", map[string]any{
+			"requestId": strings.TrimSpace(command.RequestID),
+			"history":   payload,
+		})
+	}()
 }

@@ -28,6 +28,7 @@ type PrivateMessage struct {
 	RecipientID string     `json:"recipientId"`
 	Body        string     `json:"body"`
 	SentAt      time.Time  `json:"sentAt"`
+	DeliveredAt *time.Time `json:"deliveredAt,omitempty"`
 	ReadAt      *time.Time `json:"readAt,omitempty"`
 }
 
@@ -43,6 +44,13 @@ type ConversationThread struct {
 	Messages []PrivateMessage `json:"messages"`
 }
 
+type ConversationHistoryChunk struct {
+	ConversationUserID string           `json:"conversationUserId"`
+	User               ChatUser         `json:"user"`
+	Messages           []PrivateMessage `json:"messages"`
+	HasMore            bool             `json:"hasMore"`
+}
+
 type SendPrivateMessageInput struct {
 	Body string
 }
@@ -56,6 +64,12 @@ type ConversationReadResult struct {
 type ChatMessageEvent struct {
 	ConversationUserID string         `json:"conversationUserId"`
 	Message            PrivateMessage `json:"message"`
+}
+
+type MessageDeliveryEvent struct {
+	ConversationUserID string    `json:"conversationUserId"`
+	MessageIDs         []string  `json:"messageIds"`
+	DeliveredAt        time.Time `json:"deliveredAt"`
 }
 
 type ConversationReadEvent struct {
@@ -80,6 +94,7 @@ func (s Service) Conversations(ctx context.Context, userID string) ([]Conversati
 					pm.recipient_id,
 					pm.body,
 					pm.sent_at,
+					pm.delivered_at,
 					pm.read_at,
 					ROW_NUMBER() OVER (
 						PARTITION BY CASE
@@ -109,6 +124,7 @@ func (s Service) Conversations(ctx context.Context, userID string) ([]Conversati
 				ranked.recipient_id,
 				ranked.body,
 				ranked.sent_at,
+				ranked.delivered_at,
 				ranked.read_at,
 				COALESCE(unread.unread_count, 0) AS unread_count
 			FROM ranked
@@ -155,7 +171,7 @@ func (s Service) Conversation(ctx context.Context, viewerID, partnerID string) (
 	rows, err := s.db.QueryContext(
 		ctx,
 		`
-			SELECT id, sender_id, recipient_id, body, sent_at, read_at
+			SELECT id, sender_id, recipient_id, body, sent_at, delivered_at, read_at
 			FROM private_messages
 			WHERE (sender_id = $1 AND recipient_id = $2)
 			   OR (sender_id = $2 AND recipient_id = $1)
@@ -189,6 +205,118 @@ func (s Service) Conversation(ctx context.Context, viewerID, partnerID string) (
 	}, nil
 }
 
+func (s Service) ConversationHistory(ctx context.Context, viewerID, partnerID, beforeMessageID string, limit int) (ConversationHistoryChunk, error) {
+	normalizedPartnerID, err := normalizeConversationPartner(viewerID, partnerID)
+	if err != nil {
+		return ConversationHistoryChunk{}, err
+	}
+
+	normalizedLimit := limit
+	if normalizedLimit <= 0 {
+		normalizedLimit = 10
+	}
+	if normalizedLimit > 50 {
+		normalizedLimit = 50
+	}
+
+	user, err := s.loadChatUser(ctx, normalizedPartnerID)
+	if err != nil {
+		return ConversationHistoryChunk{}, err
+	}
+
+	var referenceSentAt time.Time
+	var referenceID string
+	trimmedBeforeMessageID := strings.TrimSpace(beforeMessageID)
+	if trimmedBeforeMessageID != "" {
+		if err := s.db.QueryRowContext(
+			ctx,
+			`
+				SELECT sent_at, id
+				FROM private_messages
+				WHERE id = $1
+				  AND (
+					(sender_id = $2 AND recipient_id = $3)
+					OR
+					(sender_id = $3 AND recipient_id = $2)
+				  )
+			`,
+			trimmedBeforeMessageID,
+			viewerID,
+			normalizedPartnerID,
+		).Scan(&referenceSentAt, &referenceID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ConversationHistoryChunk{}, ErrNotFound
+			}
+
+			return ConversationHistoryChunk{}, fmt.Errorf("load history cursor: %w", err)
+		}
+	}
+
+	queryArgs := []any{viewerID, normalizedPartnerID}
+	query := `
+		SELECT id, sender_id, recipient_id, body, sent_at, delivered_at, read_at
+		FROM private_messages
+		WHERE (
+			(sender_id = $1 AND recipient_id = $2)
+			OR
+			(sender_id = $2 AND recipient_id = $1)
+		)
+	`
+
+	if referenceID != "" {
+		query += `
+			AND (
+				sent_at < $3
+				OR
+				(sent_at = $3 AND id < $4)
+			)
+		`
+		queryArgs = append(queryArgs, referenceSentAt, referenceID)
+	}
+
+	query += fmt.Sprintf(`
+		ORDER BY sent_at DESC, id DESC
+		LIMIT %d
+	`, normalizedLimit+1)
+
+	rows, err := s.db.QueryContext(ctx, query, queryArgs...)
+	if err != nil {
+		return ConversationHistoryChunk{}, fmt.Errorf("query conversation history: %w", err)
+	}
+	defer rows.Close()
+
+	loaded := make([]PrivateMessage, 0, normalizedLimit+1)
+	for rows.Next() {
+		message, err := scanPrivateMessage(rows)
+		if err != nil {
+			return ConversationHistoryChunk{}, err
+		}
+
+		loaded = append(loaded, message)
+	}
+
+	if err := rows.Err(); err != nil {
+		return ConversationHistoryChunk{}, fmt.Errorf("iterate conversation history: %w", err)
+	}
+
+	hasMore := false
+	if len(loaded) > normalizedLimit {
+		hasMore = true
+		loaded = loaded[:normalizedLimit]
+	}
+
+	for left, right := 0, len(loaded)-1; left < right; left, right = left+1, right-1 {
+		loaded[left], loaded[right] = loaded[right], loaded[left]
+	}
+
+	return ConversationHistoryChunk{
+		ConversationUserID: normalizedPartnerID,
+		User:               user,
+		Messages:           loaded,
+		HasMore:            hasMore,
+	}, nil
+}
+
 func (s Service) SendPrivateMessage(ctx context.Context, sender auth.User, partnerID string, input SendPrivateMessageInput) (PrivateMessage, error) {
 	normalizedPartnerID, err := normalizeConversationPartner(sender.ID, partnerID)
 	if err != nil {
@@ -214,6 +342,9 @@ func (s Service) SendPrivateMessage(ctx context.Context, sender auth.User, partn
 		return PrivateMessage{}, err
 	}
 
+	partnerOnline := s.publisher.HasUserConnection(normalizedPartnerID)
+	partnerViewingConversation := s.publisher.IsViewingConversation(normalizedPartnerID, sender.ID)
+
 	messageID, err := newToken(16)
 	if err != nil {
 		return PrivateMessage{}, fmt.Errorf("generate private message id: %w", err)
@@ -233,6 +364,25 @@ func (s Service) SendPrivateMessage(ctx context.Context, sender auth.User, partn
 		normalizedInput.Body,
 	).Scan(&sentAt); err != nil {
 		return PrivateMessage{}, fmt.Errorf("insert private message: %w", err)
+	}
+
+	var messageNotification Notification
+	if !partnerViewingConversation {
+		createdNotification, notificationErr := s.insertNotification(
+			ctx,
+			tx,
+			normalizedPartnerID,
+			"direct_message",
+			"New private message",
+			fmt.Sprintf("%s sent you a message.", displayNameFromAuthUser(sender)),
+			"conversation",
+			sender.ID,
+		)
+		if notificationErr != nil {
+			return PrivateMessage{}, notificationErr
+		}
+
+		messageNotification = createdNotification
 	}
 
 	if err = tx.Commit(); err != nil {
@@ -255,8 +405,66 @@ func (s Service) SendPrivateMessage(ctx context.Context, sender auth.User, partn
 		ConversationUserID: sender.ID,
 		Message:            message,
 	})
+	if messageNotification.ID != "" {
+		s.publisher.PublishToUser(normalizedPartnerID, "notification.created", NotificationEvent{
+			Notification: messageNotification,
+		})
+	}
+	if partnerOnline {
+		_ = s.MarkMessageDelivered(ctx, normalizedPartnerID, messageID)
+	}
 
 	return message, nil
+}
+
+func (s Service) MarkMessageDelivered(ctx context.Context, recipientID, messageID string) error {
+	normalizedRecipientID := strings.TrimSpace(recipientID)
+	normalizedMessageID := strings.TrimSpace(messageID)
+	if normalizedRecipientID == "" || normalizedMessageID == "" {
+		return nil
+	}
+
+	deliveredAt := time.Now().UTC()
+	var senderID string
+	var readAt sql.NullTime
+	if err := s.db.QueryRowContext(
+		ctx,
+		`
+			UPDATE private_messages
+			SET delivered_at = COALESCE(delivered_at, $3)
+			WHERE id = $1
+			  AND recipient_id = $2
+			RETURNING sender_id, read_at
+		`,
+		normalizedMessageID,
+		normalizedRecipientID,
+		deliveredAt,
+	).Scan(&senderID, &readAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+
+		return fmt.Errorf("mark message delivered: %w", err)
+	}
+
+	if readAt.Valid {
+		return nil
+	}
+
+	event := MessageDeliveryEvent{
+		ConversationUserID: normalizedRecipientID,
+		MessageIDs:         []string{normalizedMessageID},
+		DeliveredAt:        deliveredAt,
+	}
+
+	s.publisher.PublishToUser(senderID, "chat.message.delivered", event)
+	s.publisher.PublishToUser(normalizedRecipientID, "chat.message.delivered", MessageDeliveryEvent{
+		ConversationUserID: senderID,
+		MessageIDs:         []string{normalizedMessageID},
+		DeliveredAt:        deliveredAt,
+	})
+
+	return nil
 }
 
 func (s Service) MarkConversationRead(ctx context.Context, viewerID, partnerID string) (ConversationReadResult, error) {
@@ -274,7 +482,8 @@ func (s Service) MarkConversationRead(ctx context.Context, viewerID, partnerID s
 		ctx,
 		`
 			UPDATE private_messages
-			SET read_at = $3
+			SET delivered_at = COALESCE(delivered_at, $3),
+			    read_at = $3
 			WHERE sender_id = $1
 			  AND recipient_id = $2
 			  AND read_at IS NULL
@@ -314,6 +523,16 @@ func (s Service) MarkConversationRead(ctx context.Context, viewerID, partnerID s
 
 	result.ReadAt = &readAt
 
+	s.publisher.PublishToUser(normalizedPartnerID, "chat.message.delivered", MessageDeliveryEvent{
+		ConversationUserID: viewerID,
+		MessageIDs:         messageIDs,
+		DeliveredAt:        readAt,
+	})
+	s.publisher.PublishToUser(viewerID, "chat.message.delivered", MessageDeliveryEvent{
+		ConversationUserID: normalizedPartnerID,
+		MessageIDs:         messageIDs,
+		DeliveredAt:        readAt,
+	})
 	s.publisher.PublishToUser(viewerID, "chat.conversation.read", ConversationReadEvent{
 		ConversationUserID: normalizedPartnerID,
 		ReaderID:           viewerID,
@@ -375,6 +594,7 @@ func (s Service) scanConversationSummary(scanner interface{ Scan(dest ...any) er
 	var summary ConversationSummary
 	var nickname sql.NullString
 	var avatarURL sql.NullString
+	var deliveredAt sql.NullTime
 	var readAt sql.NullTime
 	if err := scanner.Scan(
 		&summary.User.ID,
@@ -388,6 +608,7 @@ func (s Service) scanConversationSummary(scanner interface{ Scan(dest ...any) er
 		&summary.LastMessage.RecipientID,
 		&summary.LastMessage.Body,
 		&summary.LastMessage.SentAt,
+		&deliveredAt,
 		&readAt,
 		&summary.UnreadCount,
 	); err != nil {
@@ -398,6 +619,7 @@ func (s Service) scanConversationSummary(scanner interface{ Scan(dest ...any) er
 	if avatarURL.Valid {
 		summary.User.AvatarURL = s.publicURL(avatarURL.String)
 	}
+	summary.LastMessage.DeliveredAt = nullTimePointer(deliveredAt)
 	summary.LastMessage.ReadAt = nullTimePointer(readAt)
 	summary.UpdatedAt = summary.LastMessage.SentAt
 
@@ -406,6 +628,7 @@ func (s Service) scanConversationSummary(scanner interface{ Scan(dest ...any) er
 
 func scanPrivateMessage(scanner interface{ Scan(dest ...any) error }) (PrivateMessage, error) {
 	var message PrivateMessage
+	var deliveredAt sql.NullTime
 	var readAt sql.NullTime
 	if err := scanner.Scan(
 		&message.ID,
@@ -413,11 +636,13 @@ func scanPrivateMessage(scanner interface{ Scan(dest ...any) error }) (PrivateMe
 		&message.RecipientID,
 		&message.Body,
 		&message.SentAt,
+		&deliveredAt,
 		&readAt,
 	); err != nil {
 		return PrivateMessage{}, fmt.Errorf("scan private message: %w", err)
 	}
 
+	message.DeliveredAt = nullTimePointer(deliveredAt)
 	message.ReadAt = nullTimePointer(readAt)
 	return message, nil
 }

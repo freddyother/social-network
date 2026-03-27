@@ -17,8 +17,10 @@ class RealtimeClient {
     this.socket = null
     this.listeners = new Map()
     this.postSubscriptions = new Set()
+    this.pendingMessages = []
     this.reconnectTimer = null
     this.desiredUserId = ""
+    this.activeConversationUserId = ""
   }
 
   connect(userId) {
@@ -42,7 +44,10 @@ class RealtimeClient {
 
     this.socket = new WebSocket(this.url)
     this.socket.addEventListener("open", () => {
+      this.flushPendingMessages()
       this.flushPostSubscriptions()
+      this.flushActiveConversationView()
+      this.emit({ type: "ws.ready", payload: { userId: this.desiredUserId } })
     })
 
     this.socket.addEventListener("message", (event) => {
@@ -98,6 +103,57 @@ class RealtimeClient {
     this.send({ type: "unsubscribe.post", postId: normalizedPostId })
   }
 
+  ackChatDelivered(messageId) {
+    const normalizedMessageId = (messageId || "").trim()
+    if (!normalizedMessageId) {
+      return
+    }
+
+    this.send({ type: "ack.chat.delivered", messageId: normalizedMessageId })
+  }
+
+  ackChatRead(conversationUserId) {
+    const normalizedConversationUserId = (conversationUserId || "").trim()
+    if (!normalizedConversationUserId) {
+      return
+    }
+
+    this.send({ type: "ack.chat.read", conversationUserId: normalizedConversationUserId })
+  }
+
+  requestChatHistory({ conversationUserId, beforeMessageId = "", limit = 10, requestId = "" }) {
+    const normalizedConversationUserId = (conversationUserId || "").trim()
+    if (!normalizedConversationUserId) {
+      return
+    }
+
+    this.send({
+      type: "chat.history",
+      conversationUserId: normalizedConversationUserId,
+      beforeMessageId: (beforeMessageId || "").trim(),
+      limit,
+      requestId: (requestId || "").trim()
+    })
+  }
+
+  enterChatView(conversationUserId) {
+    const normalizedConversationUserId = (conversationUserId || "").trim()
+    if (!normalizedConversationUserId) {
+      return
+    }
+
+    this.activeConversationUserId = normalizedConversationUserId
+    this.send({
+      type: "chat.view",
+      conversationUserId: normalizedConversationUserId
+    })
+  }
+
+  leaveChatView() {
+    this.activeConversationUserId = ""
+    this.send({ type: "chat.leave" })
+  }
+
   on(type, listener) {
     const listeners = this.listeners.get(type) || new Set()
     listeners.add(listener)
@@ -129,8 +185,30 @@ class RealtimeClient {
     }
   }
 
+  flushActiveConversationView() {
+    if (!this.activeConversationUserId) {
+      return
+    }
+
+    this.send({
+      type: "chat.view",
+      conversationUserId: this.activeConversationUserId
+    })
+  }
+
+  flushPendingMessages() {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      return
+    }
+
+    for (const message of this.pendingMessages.splice(0)) {
+      this.socket.send(JSON.stringify(message))
+    }
+  }
+
   send(message) {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      this.pendingMessages.push(message)
       return
     }
 

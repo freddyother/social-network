@@ -1,6 +1,7 @@
 package transporthttp
 
 import (
+	"context"
 	"database/sql"
 	stdlibhttp "net/http"
 
@@ -22,6 +23,15 @@ func NewRouter(cfg config.Config, db *sql.DB) stdlibhttp.Handler {
 	realtimeHub := realtime.NewHub()
 	socialService := social.NewService(db, cfg.UploadsDir, cfg.PublicBaseURL, realtimeHub)
 	realtimeHub.SetPostSubscriptionAuthorizer(socialService.CanViewPost)
+	realtimeHub.SetMessageDeliveredHandler(func(ctx context.Context, userID, messageID string) {
+		_ = socialService.MarkMessageDelivered(ctx, userID, messageID)
+	})
+	realtimeHub.SetConversationReadHandler(func(ctx context.Context, userID, conversationUserID string) {
+		_, _ = socialService.MarkConversationRead(ctx, userID, conversationUserID)
+	})
+	realtimeHub.SetChatHistoryHandler(func(ctx context.Context, userID, conversationUserID, beforeMessageID string, limit int) (any, error) {
+		return socialService.ConversationHistory(ctx, userID, conversationUserID, beforeMessageID, limit)
+	})
 	authHandler := handlers.NewAuthHandler(authService, cfg.Session)
 	socialHandler := handlers.NewSocialHandler(
 		authService,

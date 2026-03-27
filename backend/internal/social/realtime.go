@@ -5,6 +5,8 @@ import "time"
 type EventPublisher interface {
 	PublishToUser(userID, eventType string, payload any)
 	PublishToPost(postID, eventType string, payload any)
+	HasUserConnection(userID string) bool
+	IsViewingConversation(userID, conversationUserID string) bool
 }
 
 type noopEventPublisher struct{}
@@ -12,6 +14,10 @@ type noopEventPublisher struct{}
 func (noopEventPublisher) PublishToUser(string, string, any) {}
 
 func (noopEventPublisher) PublishToPost(string, string, any) {}
+
+func (noopEventPublisher) HasUserConnection(string) bool { return false }
+
+func (noopEventPublisher) IsViewingConversation(string, string) bool { return false }
 
 type NotificationEvent struct {
 	Notification Notification `json:"notification"`
