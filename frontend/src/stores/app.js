@@ -3,7 +3,8 @@ import { computed, reactive } from "vue"
 const state = reactive({
   apiStatus: "checking",
   meta: null,
-  currentUser: null
+  currentUser: null,
+  notificationUnreadCount: 0
 })
 
 export function useAppStore() {
@@ -21,8 +22,13 @@ export function useAppStore() {
     state.currentUser = user
   }
 
+  function setNotificationUnreadCount(count) {
+    state.notificationUnreadCount = Math.max(0, Number(count) || 0)
+  }
+
   function clearCurrentUser() {
     state.currentUser = null
+    state.notificationUnreadCount = 0
   }
 
   return {
@@ -31,6 +37,7 @@ export function useAppStore() {
     setApiStatus,
     setMeta,
     setCurrentUser,
+    setNotificationUnreadCount,
     clearCurrentUser
   }
 }

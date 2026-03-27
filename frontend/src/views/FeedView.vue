@@ -2,7 +2,9 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue"
 
 import {
+  createComment,
   createPost,
+  fetchComments,
   fetchDiscoverUsers,
   fetchFeed,
   followUser,
@@ -36,6 +38,13 @@ const isLoading = ref(false)
 const isSubmitting = ref(false)
 const activeSlides = reactive({})
 const followLoading = reactive({})
+const expandedComments = reactive({})
+const commentsByPost = reactive({})
+const commentsLoading = reactive({})
+const commentErrorByPost = reactive({})
+const commentForms = reactive({})
+const replyForms = reactive({})
+const commentSubmitting = reactive({})
 
 const hasPrivateAccount = computed(() => store.state.currentUser?.profileVisibility === "private")
 
@@ -52,6 +61,50 @@ function formatDate(value) {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(new Date(value))
+}
+
+function commentCountLabel(count) {
+  return count === 1 ? "1 comment" : `${count} comments`
+}
+
+function clearObject(object) {
+  Object.keys(object).forEach((key) => {
+    delete object[key]
+  })
+}
+
+function ensureCommentState(postId) {
+  if (!commentForms[postId]) {
+    commentForms[postId] = { body: "" }
+  }
+
+  if (!commentsByPost[postId]) {
+    commentsByPost[postId] = []
+  }
+
+  if (!(postId in commentsLoading)) {
+    commentsLoading[postId] = false
+  }
+
+  if (!(postId in commentErrorByPost)) {
+    commentErrorByPost[postId] = ""
+  }
+}
+
+function replyKey(postId, commentId) {
+  return `${postId}:${commentId}`
+}
+
+function ensureReplyForm(postId, commentId) {
+  const key = replyKey(postId, commentId)
+  if (!replyForms[key]) {
+    replyForms[key] = {
+      body: "",
+      open: false
+    }
+  }
+
+  return replyForms[key]
 }
 
 function clearComposerErrors() {
@@ -87,6 +140,13 @@ async function loadFeedData() {
   if (!isAuthenticated.value) {
     posts.value = []
     suggestedUsers.value = []
+    clearObject(expandedComments)
+    clearObject(commentsByPost)
+    clearObject(commentsLoading)
+    clearObject(commentErrorByPost)
+    clearObject(commentForms)
+    clearObject(replyForms)
+    clearObject(commentSubmitting)
     return
   }
 
@@ -95,12 +155,60 @@ async function loadFeedData() {
 
   try {
     const [feedPosts, discoverUsers] = await Promise.all([fetchFeed(), fetchDiscoverUsers()])
+
     posts.value = feedPosts
     suggestedUsers.value = discoverUsers
+
+    clearObject(expandedComments)
+    clearObject(commentsByPost)
+    clearObject(commentsLoading)
+    clearObject(commentErrorByPost)
+    clearObject(commentForms)
+    clearObject(replyForms)
+    clearObject(commentSubmitting)
+
+    for (const post of feedPosts) {
+      activeSlides[post.id] = 0
+      ensureCommentState(post.id)
+    }
   } catch (error) {
     requestError.value = error instanceof Error ? error.message : "Could not load the feed."
   } finally {
     isLoading.value = false
+  }
+}
+
+async function loadComments(postId) {
+  ensureCommentState(postId)
+  commentsLoading[postId] = true
+  commentErrorByPost[postId] = ""
+
+  try {
+    commentsByPost[postId] = await fetchComments(postId)
+    for (const comment of commentsByPost[postId]) {
+      ensureReplyForm(postId, comment.id)
+    }
+  } catch (error) {
+    commentErrorByPost[postId] = error instanceof Error ? error.message : "Could not load comments."
+  } finally {
+    commentsLoading[postId] = false
+  }
+}
+
+async function toggleComments(post) {
+  ensureCommentState(post.id)
+  expandedComments[post.id] = !expandedComments[post.id]
+
+  if (expandedComments[post.id] && !commentsByPost[post.id].length && post.commentsCount >= 0) {
+    await loadComments(post.id)
+  }
+}
+
+function toggleReplyForm(postId, commentId) {
+  const form = ensureReplyForm(postId, commentId)
+  form.open = !form.open
+  if (!form.open) {
+    form.body = ""
   }
 }
 
@@ -116,8 +224,9 @@ async function submitPost() {
       images: composer.images
     })
 
-    posts.value = [post, ...posts.value]
+    posts.value = [{ ...post, commentsCount: post.commentsCount || 0 }, ...posts.value]
     activeSlides[post.id] = 0
+    ensureCommentState(post.id)
     resetComposer()
   } catch (error) {
     if (isApiError(error)) {
@@ -134,6 +243,56 @@ async function submitPost() {
   }
 }
 
+async function submitComment(post, parentComment = null) {
+  ensureCommentState(post.id)
+
+  const key = parentComment ? replyKey(post.id, parentComment.id) : post.id
+  const form = parentComment ? ensureReplyForm(post.id, parentComment.id) : commentForms[post.id]
+  const body = (form.body || "").trim()
+
+  commentSubmitting[key] = true
+  commentErrorByPost[post.id] = ""
+
+  try {
+    const comment = await createComment(post.id, {
+      body,
+      parentCommentId: parentComment?.id || ""
+    })
+
+    if (parentComment) {
+      commentsByPost[post.id] = commentsByPost[post.id].map((item) =>
+        item.id === parentComment.id
+          ? { ...item, replies: [...(item.replies || []), comment] }
+          : item
+      )
+
+      form.body = ""
+      form.open = false
+    } else {
+      commentsByPost[post.id] = [...commentsByPost[post.id], comment]
+      form.body = ""
+    }
+
+    posts.value = posts.value.map((item) =>
+      item.id === post.id
+        ? { ...item, commentsCount: (item.commentsCount || 0) + 1 }
+        : item
+    )
+    expandedComments[post.id] = true
+  } catch (error) {
+    if (isApiError(error)) {
+      commentErrorByPost[post.id] =
+        error.payload?.fields?.body ||
+        error.payload?.fields?.parentCommentId ||
+        error.message
+    } else {
+      commentErrorByPost[post.id] = "Could not publish the comment right now."
+    }
+  } finally {
+    commentSubmitting[key] = false
+  }
+}
+
 async function handleFollow(userId) {
   followLoading[userId] = true
 
@@ -144,7 +303,7 @@ async function handleFollow(userId) {
     )
 
     if (result.status === "following") {
-      posts.value = await fetchFeed()
+      await loadFeedData()
     }
   } catch (error) {
     requestError.value = error instanceof Error ? error.message : "Could not update follow status."
@@ -194,9 +353,9 @@ onBeforeUnmount(() => {
   <section class="page">
     <div class="panel">
       <p class="eyebrow">Feed</p>
-      <h2>Posts, carousels, and privacy rules</h2>
+      <h2>Posts, threads, and privacy rules</h2>
       <p>
-        Publish multi-image posts with titles and captions, decide whether each post is public or followers-only, and discover people to follow across public and private accounts.
+        Publish multi-image posts, open comment threads directly in the feed, and keep replies intentionally capped at two levels while the data model stays ready for deeper trees later.
       </p>
     </div>
 
@@ -205,7 +364,7 @@ onBeforeUnmount(() => {
     <div v-if="!isAuthenticated" class="panel">
       <h3>Sign in to unlock the feed</h3>
       <p>
-        The personalized feed, follow graph, and carousel composer are only available after authentication.
+        The personalized feed, follow graph, carousel composer, and threaded comments are only available after authentication.
       </p>
     </div>
 
@@ -329,6 +488,7 @@ onBeforeUnmount(() => {
                 <span>{{ formatDate(post.createdAt) }}</span>
                 <span class="badge">{{ post.privacy }}</span>
                 <span class="badge badge--soft">{{ post.author.profileVisibility }}</span>
+                <span class="badge badge--neutral">{{ commentCountLabel(post.commentsCount || 0) }}</span>
               </p>
             </div>
             <div class="post-card__timestamps">
@@ -367,6 +527,111 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
+
+          <section class="post-comments">
+            <div class="post-comments__header">
+              <div>
+                <strong>Comments</strong>
+                <p>{{ commentCountLabel(post.commentsCount || 0) }}</p>
+              </div>
+              <button type="button" class="button button--ghost button--small" @click="toggleComments(post)">
+                {{ expandedComments[post.id] ? "Hide thread" : "Open thread" }}
+              </button>
+            </div>
+
+            <div v-if="expandedComments[post.id]" class="comment-thread">
+              <form class="comment-composer" @submit.prevent="submitComment(post)">
+                <textarea
+                  v-model.trim="commentForms[post.id].body"
+                  rows="2"
+                  placeholder="Add a comment to this post"
+                ></textarea>
+                <div class="comment-composer__actions">
+                  <p class="feed-note">Replies are limited to two levels for now.</p>
+                  <button
+                    type="submit"
+                    class="button button--small"
+                    :disabled="commentSubmitting[post.id]"
+                  >
+                    {{ commentSubmitting[post.id] ? "Posting..." : "Comment" }}
+                  </button>
+                </div>
+              </form>
+
+              <p v-if="commentErrorByPost[post.id]" class="form-error">{{ commentErrorByPost[post.id] }}</p>
+              <p v-if="commentsLoading[post.id]" class="feed-note">Loading comments...</p>
+
+              <div v-else-if="commentsByPost[post.id]?.length" class="comment-stack">
+                <article v-for="comment in commentsByPost[post.id]" :key="comment.id" class="comment-card">
+                  <header class="comment-card__header">
+                    <strong>{{ displayName(comment.author) }}</strong>
+                    <span>{{ formatDate(comment.createdAt) }}</span>
+                  </header>
+                  <p class="comment-card__body">{{ comment.body }}</p>
+                  <div class="comment-card__actions">
+                    <button
+                      type="button"
+                      class="button button--ghost button--small"
+                      @click="toggleReplyForm(post.id, comment.id)"
+                    >
+                      {{
+                        replyForms[replyKey(post.id, comment.id)]?.open
+                          ? "Cancel reply"
+                          : "Reply"
+                      }}
+                    </button>
+                    <span class="feed-note">
+                      {{ comment.replies?.length ? `${comment.replies.length} replies` : "No replies yet" }}
+                    </span>
+                  </div>
+
+                  <form
+                    v-if="replyForms[replyKey(post.id, comment.id)]?.open"
+                    class="comment-composer comment-composer--reply"
+                    @submit.prevent="submitComment(post, comment)"
+                  >
+                    <textarea
+                      v-model.trim="replyForms[replyKey(post.id, comment.id)].body"
+                      rows="2"
+                      placeholder="Reply to this comment"
+                    ></textarea>
+                    <div class="comment-composer__actions">
+                      <p class="feed-note">Second level only in the current UI.</p>
+                      <button
+                        type="submit"
+                        class="button button--small"
+                        :disabled="commentSubmitting[replyKey(post.id, comment.id)]"
+                      >
+                        {{
+                          commentSubmitting[replyKey(post.id, comment.id)]
+                            ? "Posting..."
+                            : "Reply"
+                        }}
+                      </button>
+                    </div>
+                  </form>
+
+                  <div v-if="comment.replies?.length" class="reply-stack">
+                    <article
+                      v-for="reply in comment.replies"
+                      :key="reply.id"
+                      class="comment-card comment-card--reply"
+                    >
+                      <header class="comment-card__header">
+                        <strong>{{ displayName(reply.author) }}</strong>
+                        <span>{{ formatDate(reply.createdAt) }}</span>
+                      </header>
+                      <p class="comment-card__body">{{ reply.body }}</p>
+                    </article>
+                  </div>
+                </article>
+              </div>
+
+              <p v-else class="feed-note">
+                No comments yet. Start the thread with the first one.
+              </p>
+            </div>
+          </section>
         </article>
 
         <div v-if="!posts.length && !isLoading" class="panel">

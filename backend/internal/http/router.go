@@ -33,12 +33,16 @@ func NewRouter(cfg config.Config, db *sql.DB) stdlibhttp.Handler {
 	mux.HandleFunc("GET /api/v1/auth/me", authHandler.HandleCurrentUser)
 	mux.HandleFunc("GET /api/v1/posts", socialHandler.HandleFeed)
 	mux.HandleFunc("POST /api/v1/posts", socialHandler.HandleCreatePost)
+	mux.HandleFunc("GET /api/v1/posts/{postID}/comments", socialHandler.HandleComments)
+	mux.HandleFunc("POST /api/v1/posts/{postID}/comments", socialHandler.HandleCreateComment)
 	mux.HandleFunc("GET /api/v1/users/discover", socialHandler.HandleDiscoverUsers)
 	mux.HandleFunc("POST /api/v1/users/{userID}/follow", socialHandler.HandleFollowUser)
 	mux.HandleFunc("GET /api/v1/follow-requests", socialHandler.HandleFollowRequests)
 	mux.HandleFunc("POST /api/v1/follow-requests/{requestID}/accept", socialHandler.HandleAcceptFollowRequest)
 	mux.HandleFunc("POST /api/v1/follow-requests/{requestID}/decline", socialHandler.HandleDeclineFollowRequest)
 	mux.HandleFunc("PATCH /api/v1/users/me/profile-visibility", socialHandler.HandleUpdateProfileVisibility)
+	mux.HandleFunc("GET /api/v1/notifications", socialHandler.HandleNotifications)
+	mux.HandleFunc("POST /api/v1/notifications/{notificationID}/read", socialHandler.HandleMarkNotificationRead)
 	mux.Handle("GET /uploads/", stdlibhttp.StripPrefix("/uploads/", stdlibhttp.FileServer(stdlibhttp.Dir(cfg.UploadsDir))))
 	mux.HandleFunc("GET /", func(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
 		response.JSON(w, stdlibhttp.StatusOK, map[string]any{

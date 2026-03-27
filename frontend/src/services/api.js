@@ -93,6 +93,11 @@ export async function fetchFeed() {
   return payload?.posts || []
 }
 
+export async function fetchComments(postId) {
+  const payload = await request(`/posts/${postId}/comments`, { method: "GET" })
+  return payload?.comments || []
+}
+
 export async function createPost(post) {
   const formData = new FormData()
   formData.set("title", post.title)
@@ -109,6 +114,15 @@ export async function createPost(post) {
   })
 
   return payload?.post || null
+}
+
+export async function createComment(postId, comment) {
+  const payload = await request(`/posts/${postId}/comments`, {
+    method: "POST",
+    body: JSON.stringify(comment)
+  })
+
+  return payload?.comment || null
 }
 
 export async function fetchDiscoverUsers() {
@@ -140,4 +154,13 @@ export async function updateProfileVisibility(visibility) {
   })
 
   return payload?.user || null
+}
+
+export async function fetchNotifications() {
+  const payload = await request("/notifications", { method: "GET" })
+  return payload?.notifications || []
+}
+
+export function markNotificationRead(notificationId) {
+  return request(`/notifications/${notificationId}/read`, { method: "POST" })
 }

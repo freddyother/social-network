@@ -16,11 +16,15 @@ import (
 type socialService interface {
 	CreatePost(ctx context.Context, author auth.User, input social.CreatePostInput) (social.Post, error)
 	Feed(ctx context.Context, viewerID string) ([]social.Post, error)
+	Comments(ctx context.Context, viewerID, postID string) ([]social.Comment, error)
+	CreateComment(ctx context.Context, author auth.User, postID string, input social.CreateCommentInput) (social.Comment, error)
 	DiscoverUsers(ctx context.Context, viewerID string) ([]social.SuggestedUser, error)
 	FollowUser(ctx context.Context, followerID, followeeID string) (social.FollowActionResult, error)
 	IncomingFollowRequests(ctx context.Context, userID string) ([]social.FollowRequest, error)
 	RespondToFollowRequest(ctx context.Context, userID, requestID string, accept bool) error
 	UpdateProfileVisibility(ctx context.Context, userID, visibility string) (auth.User, error)
+	Notifications(ctx context.Context, userID string) ([]social.Notification, error)
+	MarkNotificationRead(ctx context.Context, userID, notificationID string) error
 }
 
 type SocialHandler struct {
@@ -83,6 +87,57 @@ func (h SocialHandler) HandleCreatePost(w stdlibhttp.ResponseWriter, r *stdlibht
 
 	response.JSON(w, stdlibhttp.StatusCreated, map[string]any{
 		"post": post,
+	})
+}
+
+func (h SocialHandler) HandleComments(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	currentUser, ok := h.requireCurrentUser(w, r)
+	if !ok {
+		return
+	}
+
+	comments, err := h.service.Comments(r.Context(), currentUser.ID, strings.TrimSpace(r.PathValue("postID")))
+	if err != nil {
+		h.handleSocialError(w, err)
+		return
+	}
+
+	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
+		"comments": comments,
+	})
+}
+
+func (h SocialHandler) HandleCreateComment(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	currentUser, ok := h.requireCurrentUser(w, r)
+	if !ok {
+		return
+	}
+
+	var payload struct {
+		Body            string `json:"body"`
+		ParentCommentID string `json:"parentCommentId"`
+	}
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdlibhttp.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	comment, err := h.service.CreateComment(
+		r.Context(),
+		*currentUser,
+		strings.TrimSpace(r.PathValue("postID")),
+		social.CreateCommentInput{
+			Body:            payload.Body,
+			ParentCommentID: payload.ParentCommentID,
+		},
+	)
+	if err != nil {
+		h.handleSocialError(w, err)
+		return
+	}
+
+	response.JSON(w, stdlibhttp.StatusCreated, map[string]any{
+		"comment": comment,
 	})
 }
 
@@ -165,6 +220,39 @@ func (h SocialHandler) HandleUpdateProfileVisibility(w stdlibhttp.ResponseWriter
 
 	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
 		"user": user,
+	})
+}
+
+func (h SocialHandler) HandleNotifications(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	currentUser, ok := h.requireCurrentUser(w, r)
+	if !ok {
+		return
+	}
+
+	notifications, err := h.service.Notifications(r.Context(), currentUser.ID)
+	if err != nil {
+		h.handleSocialError(w, err)
+		return
+	}
+
+	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
+		"notifications": notifications,
+	})
+}
+
+func (h SocialHandler) HandleMarkNotificationRead(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	currentUser, ok := h.requireCurrentUser(w, r)
+	if !ok {
+		return
+	}
+
+	if err := h.service.MarkNotificationRead(r.Context(), currentUser.ID, strings.TrimSpace(r.PathValue("notificationID"))); err != nil {
+		h.handleSocialError(w, err)
+		return
+	}
+
+	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
+		"status": "read",
 	})
 }
 

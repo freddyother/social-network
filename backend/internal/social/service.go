@@ -69,14 +69,15 @@ type PostMedia struct {
 }
 
 type Post struct {
-	ID        string      `json:"id"`
-	Title     string      `json:"title"`
-	Body      string      `json:"body"`
-	Privacy   string      `json:"privacy"`
-	CreatedAt time.Time   `json:"createdAt"`
-	UpdatedAt time.Time   `json:"updatedAt"`
-	Author    PostAuthor  `json:"author"`
-	Media     []PostMedia `json:"media"`
+	ID            string      `json:"id"`
+	Title         string      `json:"title"`
+	Body          string      `json:"body"`
+	Privacy       string      `json:"privacy"`
+	CreatedAt     time.Time   `json:"createdAt"`
+	UpdatedAt     time.Time   `json:"updatedAt"`
+	CommentsCount int         `json:"commentsCount"`
+	Author        PostAuthor  `json:"author"`
+	Media         []PostMedia `json:"media"`
 }
 
 type SuggestedUser struct {
@@ -300,8 +301,14 @@ func (s Service) Feed(ctx context.Context, viewerID string) ([]Post, error) {
 		return nil, err
 	}
 
+	commentCountsByPostID, err := s.loadCommentCounts(ctx, postIDs)
+	if err != nil {
+		return nil, err
+	}
+
 	for index := range posts {
 		posts[index].Media = mediaByPostID[posts[index].ID]
+		posts[index].CommentsCount = commentCountsByPostID[posts[index].ID]
 	}
 
 	return posts, nil
@@ -448,6 +455,11 @@ func (s Service) FollowUser(ctx context.Context, followerID, followeeID string) 
 		return FollowActionResult{}, fmt.Errorf("generate follow request id: %w", err)
 	}
 
+	followerIdentity, err := s.loadUserIdentity(ctx, tx, followerID)
+	if err != nil {
+		return FollowActionResult{}, err
+	}
+
 	if _, err = tx.ExecContext(
 		ctx,
 		`
@@ -464,6 +476,19 @@ func (s Service) FollowUser(ctx context.Context, followerID, followeeID string) 
 		followeeID,
 	); err != nil {
 		return FollowActionResult{}, fmt.Errorf("upsert follow request: %w", err)
+	}
+
+	if err = s.insertNotification(
+		ctx,
+		tx,
+		followeeID,
+		"follow_request_received",
+		"New follow request",
+		fmt.Sprintf("%s wants to follow your private account.", followerIdentity.DisplayName()),
+		"user",
+		followerID,
+	); err != nil {
+		return FollowActionResult{}, err
 	}
 
 	if err = tx.Commit(); err != nil {
@@ -577,6 +602,24 @@ func (s Service) RespondToFollowRequest(ctx context.Context, userID, requestID s
 			userID,
 		); err != nil {
 			return fmt.Errorf("insert accepted follower: %w", err)
+		}
+
+		recipientIdentity, identityErr := s.loadUserIdentity(ctx, tx, userID)
+		if identityErr != nil {
+			return identityErr
+		}
+
+		if err = s.insertNotification(
+			ctx,
+			tx,
+			senderID,
+			"follow_request_accepted",
+			"Follow request accepted",
+			fmt.Sprintf("%s accepted your follow request.", recipientIdentity.DisplayName()),
+			"user",
+			userID,
+		); err != nil {
+			return err
 		}
 	}
 

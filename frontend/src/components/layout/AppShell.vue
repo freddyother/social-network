@@ -1,8 +1,8 @@
 <script setup>
-import { computed, onMounted, ref } from "vue"
+import { computed, onMounted, ref, watch } from "vue"
 import { RouterLink, useRouter } from "vue-router"
 
-import { fetchCurrentUser, fetchHealth, fetchMeta, isApiError, logoutUser } from "../../services/api"
+import { fetchCurrentUser, fetchHealth, fetchMeta, fetchNotifications, isApiError, logoutUser } from "../../services/api"
 import { useAppStore } from "../../stores/app"
 
 const links = [
@@ -20,6 +20,7 @@ const requestError = ref("")
 const authError = ref("")
 const isLoggingOut = ref(false)
 const isAuthenticated = computed(() => Boolean(store.state.currentUser))
+const unreadNotifications = computed(() => store.state.notificationUnreadCount)
 const currentUserName = computed(() => {
   const user = store.state.currentUser
   if (!user) {
@@ -28,6 +29,25 @@ const currentUserName = computed(() => {
 
   return user.nickname || `${user.firstName} ${user.lastName}`.trim() || user.email
 })
+
+async function refreshNotifications() {
+  if (!store.state.currentUser) {
+    store.setNotificationUnreadCount(0)
+    return
+  }
+
+  try {
+    const notifications = await fetchNotifications()
+    store.setNotificationUnreadCount(notifications.filter((item) => !item.isRead).length)
+  } catch (error) {
+    if (isApiError(error, 401)) {
+      store.setNotificationUnreadCount(0)
+      return
+    }
+
+    throw error
+  }
+}
 
 async function bootstrap() {
   try {
@@ -47,6 +67,7 @@ async function bootstrap() {
     store.setMeta(meta)
     store.setCurrentUser(currentUser)
     requestError.value = ""
+    await refreshNotifications()
   } catch (error) {
     store.setApiStatus("down")
     requestError.value = error instanceof Error ? error.message : "Backend unavailable"
@@ -71,6 +92,13 @@ async function handleLogout() {
 onMounted(() => {
   void bootstrap()
 })
+
+watch(
+  () => store.state.currentUser?.id,
+  () => {
+    void refreshNotifications()
+  }
+)
 </script>
 
 <template>
@@ -89,7 +117,10 @@ onMounted(() => {
           :to="link.to"
           class="shell__nav-link"
         >
-          {{ link.label }}
+          <span>{{ link.label }}</span>
+          <span v-if="link.to === '/notifications' && unreadNotifications" class="shell__nav-badge">
+            {{ unreadNotifications }}
+          </span>
         </RouterLink>
       </nav>
 
