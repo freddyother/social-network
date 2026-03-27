@@ -166,8 +166,7 @@ watch(
   <div class="shell">
     <aside class="shell__sidebar">
       <RouterLink to="/feed" class="shell__brand" title="Go to the feed">
-        <img src="/nexo-logo.png" alt="NEXO logo" class="shell__brand-logo" />
-        <span class="shell__brand-tagline">Share your world. your way.</span>
+        <img src="/nexo-mark.png" alt="NEXO mark" class="shell__brand-logo" />
       </RouterLink>
 
       <nav class="shell__icon-rail" aria-label="Primary navigation">
@@ -207,8 +206,8 @@ watch(
       <header class="shell__header">
         <div>
           <img
-            src="/nexo-logo.png"
-            :alt="store.state.meta?.name || 'NEXO'"
+            src="/nexo-wordmark.png"
+            :alt="`${store.state.meta?.name || 'NEXO'} wordmark`"
             class="shell__header-logo"
           />
         </div>

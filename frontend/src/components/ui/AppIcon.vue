@@ -1,8 +1,8 @@
 <script setup>
 import {
+  Bell,
   CircleUserRound,
   Compass,
-  Heart,
   House,
   Plus,
   Send
@@ -24,7 +24,7 @@ const icons = {
   create: Plus,
   profile: CircleUserRound,
   groups: Compass,
-  notifications: Heart,
+  notifications: Bell,
   chat: Send
 }
 </script>

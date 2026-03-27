@@ -715,6 +715,7 @@ func (s Service) UpdateProfileVisibility(ctx context.Context, userID, visibility
 				nickname,
 				about_me,
 				profile_visibility,
+				theme_preference,
 				created_at,
 				updated_at
 		`,
@@ -729,6 +730,48 @@ func (s Service) UpdateProfileVisibility(ctx context.Context, userID, visibility
 		}
 
 		return auth.User{}, fmt.Errorf("update profile visibility: %w", err)
+	}
+
+	return user, nil
+}
+
+func (s Service) UpdateThemePreference(ctx context.Context, userID, themePreference string) (auth.User, error) {
+	normalizedThemePreference, err := normalizeThemePreference(themePreference)
+	if err != nil {
+		return auth.User{}, err
+	}
+
+	row := s.db.QueryRowContext(
+		ctx,
+		`
+			UPDATE users
+			SET theme_preference = $1, updated_at = NOW()
+			WHERE id = $2
+			RETURNING
+				id,
+				email,
+				first_name,
+				last_name,
+				date_of_birth,
+				avatar_url,
+				nickname,
+				about_me,
+				profile_visibility,
+				theme_preference,
+				created_at,
+				updated_at
+		`,
+		normalizedThemePreference,
+		userID,
+	)
+
+	user, err := scanAuthUser(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return auth.User{}, ErrNotFound
+		}
+
+		return auth.User{}, fmt.Errorf("update theme preference: %w", err)
 	}
 
 	return user, nil
@@ -934,6 +977,21 @@ func normalizeProfileVisibility(visibility string) (string, error) {
 	return normalized, nil
 }
 
+func normalizeThemePreference(themePreference string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(themePreference))
+	switch normalized {
+	case "nexo-blue", "nexo-ice", "graphite-gold":
+		return normalized, nil
+	default:
+		return "", &ValidationError{
+			Message: "Theme preference is invalid.",
+			Fields: map[string]string{
+				"themePreference": "Choose one of the available NEXO themes.",
+			},
+		}
+	}
+}
+
 func imageExtension(file multipart.File) (string, error) {
 	sniffBuffer := make([]byte, 512)
 	bytesRead, err := file.Read(sniffBuffer)
@@ -1017,6 +1075,7 @@ func scanAuthUser(row authUserScanner) (auth.User, error) {
 		&nickname,
 		&aboutMe,
 		&user.ProfileVisibility,
+		&user.ThemePreference,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	); err != nil {

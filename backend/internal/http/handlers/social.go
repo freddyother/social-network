@@ -23,6 +23,7 @@ type socialService interface {
 	IncomingFollowRequests(ctx context.Context, userID string) ([]social.FollowRequest, error)
 	RespondToFollowRequest(ctx context.Context, userID, requestID string, accept bool) error
 	UpdateProfileVisibility(ctx context.Context, userID, visibility string) (auth.User, error)
+	UpdateThemePreference(ctx context.Context, userID, themePreference string) (auth.User, error)
 	Notifications(ctx context.Context, userID string) ([]social.Notification, error)
 	MarkNotificationRead(ctx context.Context, userID, notificationID string) error
 }
@@ -213,6 +214,31 @@ func (h SocialHandler) HandleUpdateProfileVisibility(w stdlibhttp.ResponseWriter
 	}
 
 	user, err := h.service.UpdateProfileVisibility(r.Context(), currentUser.ID, payload.Visibility)
+	if err != nil {
+		h.handleSocialError(w, err)
+		return
+	}
+
+	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
+		"user": user,
+	})
+}
+
+func (h SocialHandler) HandleUpdateThemePreference(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	currentUser, ok := h.requireCurrentUser(w, r)
+	if !ok {
+		return
+	}
+
+	var payload struct {
+		ThemePreference string `json:"themePreference"`
+	}
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdlibhttp.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	user, err := h.service.UpdateThemePreference(r.Context(), currentUser.ID, payload.ThemePreference)
 	if err != nil {
 		h.handleSocialError(w, err)
 		return

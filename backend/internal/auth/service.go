@@ -44,6 +44,7 @@ type User struct {
 	Nickname          string    `json:"nickname,omitempty"`
 	AboutMe           string    `json:"aboutMe,omitempty"`
 	ProfileVisibility string    `json:"profileVisibility"`
+	ThemePreference   string    `json:"themePreference"`
 	CreatedAt         time.Time `json:"createdAt"`
 	UpdatedAt         time.Time `json:"updatedAt"`
 }
@@ -142,6 +143,7 @@ func (s Service) Register(ctx context.Context, input RegisterInput) (AuthResult,
 				nickname,
 				about_me,
 				profile_visibility,
+				theme_preference,
 				created_at,
 				updated_at
 		`,
@@ -256,6 +258,7 @@ func (s Service) CurrentUser(ctx context.Context, sessionID string) (*User, erro
 				u.nickname,
 				u.about_me,
 				u.profile_visibility,
+				u.theme_preference,
 				u.created_at,
 				u.updated_at
 			FROM sessions s
@@ -294,6 +297,7 @@ func (s Service) findUserByEmail(ctx context.Context, email string) (userRecord,
 				nickname,
 				about_me,
 				profile_visibility,
+				theme_preference,
 				created_at,
 				updated_at
 			FROM users
@@ -435,6 +439,7 @@ type userRecord struct {
 	Nickname          sql.NullString
 	AboutMe           sql.NullString
 	ProfileVisibility string
+	ThemePreference   string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }
@@ -450,6 +455,7 @@ func (r userRecord) PublicUser() User {
 		Nickname:          nullableStringValue(r.Nickname),
 		AboutMe:           nullableStringValue(r.AboutMe),
 		ProfileVisibility: r.ProfileVisibility,
+		ThemePreference:   r.ThemePreference,
 		CreatedAt:         r.CreatedAt,
 		UpdatedAt:         r.UpdatedAt,
 	}
@@ -468,6 +474,7 @@ func scanUserRecord(row scanner) (userRecord, error) {
 		&record.Nickname,
 		&record.AboutMe,
 		&record.ProfileVisibility,
+		&record.ThemePreference,
 		&record.CreatedAt,
 		&record.UpdatedAt,
 	)

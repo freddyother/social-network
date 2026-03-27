@@ -47,6 +47,7 @@ func NewRouter(cfg config.Config, db *sql.DB) stdlibhttp.Handler {
 	mux.HandleFunc("POST /api/v1/follow-requests/{requestID}/accept", socialHandler.HandleAcceptFollowRequest)
 	mux.HandleFunc("POST /api/v1/follow-requests/{requestID}/decline", socialHandler.HandleDeclineFollowRequest)
 	mux.HandleFunc("PATCH /api/v1/users/me/profile-visibility", socialHandler.HandleUpdateProfileVisibility)
+	mux.HandleFunc("PATCH /api/v1/users/me/theme-preference", socialHandler.HandleUpdateThemePreference)
 	mux.HandleFunc("GET /api/v1/notifications", socialHandler.HandleNotifications)
 	mux.HandleFunc("POST /api/v1/notifications/{notificationID}/read", socialHandler.HandleMarkNotificationRead)
 	mux.Handle("GET /uploads/", stdlibhttp.StripPrefix("/uploads/", stdlibhttp.FileServer(stdlibhttp.Dir(cfg.UploadsDir))))

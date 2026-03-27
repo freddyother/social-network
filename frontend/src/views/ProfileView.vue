@@ -6,10 +6,12 @@ import {
   declineFollowRequest,
   fetchFollowRequests,
   isApiError,
-  updateProfileVisibility
+  updateProfileVisibility,
+  updateThemePreference
 } from "../services/api"
 import { realtimeClient } from "../services/realtime"
 import { useAppStore } from "../stores/app"
+import { THEME_OPTIONS } from "../theme"
 
 const props = defineProps({
   handle: {
@@ -33,13 +35,17 @@ const privacyForm = reactive({
   visibility: "public"
 })
 
+const themeOptions = THEME_OPTIONS
 const requests = ref([])
 const profileError = ref("")
 const requestError = ref("")
+const themeError = ref("")
 const isSavingPrivacy = ref(false)
+const isSavingTheme = ref("")
 const loadingRequests = ref(false)
 const requestLoading = reactive({})
 const removeRealtimeListeners = []
+const activeThemePreference = computed(() => currentProfile.value?.themePreference || store.state.themePreference)
 
 function loadPrivacyValue() {
   privacyForm.visibility = currentProfile.value?.profileVisibility || "public"
@@ -82,6 +88,40 @@ async function saveProfileVisibility() {
     }
   } finally {
     isSavingPrivacy.value = false
+  }
+}
+
+function themePreviewStyle(option) {
+  return {
+    "--theme-preview-1": option.swatches[0],
+    "--theme-preview-2": option.swatches[1],
+    "--theme-preview-3": option.swatches[2],
+    "--theme-preview-4": option.swatches[3]
+  }
+}
+
+async function selectTheme(themePreference) {
+  if (!currentProfile.value || activeThemePreference.value === themePreference) {
+    return
+  }
+
+  const previousThemePreference = activeThemePreference.value
+  isSavingTheme.value = themePreference
+  themeError.value = ""
+  store.updateCurrentUser({ themePreference })
+
+  try {
+    const updatedUser = await updateThemePreference(themePreference)
+    store.setCurrentUser(updatedUser)
+  } catch (error) {
+    store.updateCurrentUser({ themePreference: previousThemePreference })
+    if (isApiError(error)) {
+      themeError.value = error.message
+    } else {
+      themeError.value = "Could not update theme preference."
+    }
+  } finally {
+    isSavingTheme.value = ""
   }
 }
 
@@ -200,6 +240,41 @@ onBeforeUnmount(() => {
         </section>
 
         <section class="panel">
+          <p class="eyebrow">Appearance</p>
+          <h3>Color theme</h3>
+          <p>Pick the NEXO palette you want to use. The change is applied immediately.</p>
+          <div class="theme-picker" role="radiogroup" aria-label="Theme preference">
+            <button
+              v-for="option in themeOptions"
+              :key="option.value"
+              type="button"
+              class="theme-option"
+              :class="{ 'theme-option--active': activeThemePreference === option.value }"
+              :style="themePreviewStyle(option)"
+              :disabled="Boolean(isSavingTheme)"
+              :aria-pressed="activeThemePreference === option.value"
+              @click="selectTheme(option.value)"
+            >
+              <span class="theme-option__swatches" aria-hidden="true">
+                <span class="theme-option__swatch theme-option__swatch--1"></span>
+                <span class="theme-option__swatch theme-option__swatch--2"></span>
+                <span class="theme-option__swatch theme-option__swatch--3"></span>
+                <span class="theme-option__swatch theme-option__swatch--4"></span>
+              </span>
+              <span class="theme-option__meta">
+                <strong>{{ option.label }}</strong>
+                <small>{{ option.description }}</small>
+              </span>
+              <span class="badge" :class="activeThemePreference === option.value ? '' : 'badge--neutral'">
+                {{ isSavingTheme === option.value ? "Saving..." : activeThemePreference === option.value ? "Active" : "Apply" }}
+              </span>
+            </button>
+          </div>
+          <p v-if="themeError" class="form-error">{{ themeError }}</p>
+        </section>
+      </div>
+
+      <section class="panel">
           <p class="eyebrow">Followers</p>
           <h3>Pending follow requests</h3>
           <p v-if="requestError" class="form-error">{{ requestError }}</p>
@@ -231,8 +306,7 @@ onBeforeUnmount(() => {
             </article>
           </div>
           <p v-else>No pending follow requests right now.</p>
-        </section>
-      </div>
+      </section>
     </template>
   </section>
 </template>

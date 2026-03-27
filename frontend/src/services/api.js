@@ -156,6 +156,15 @@ export async function updateProfileVisibility(visibility) {
   return payload?.user || null
 }
 
+export async function updateThemePreference(themePreference) {
+  const payload = await request("/users/me/theme-preference", {
+    method: "PATCH",
+    body: JSON.stringify({ themePreference })
+  })
+
+  return payload?.user || null
+}
+
 export async function fetchNotifications() {
   const payload = await request("/notifications", { method: "GET" })
   return payload?.notifications || []
