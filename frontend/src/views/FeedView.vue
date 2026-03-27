@@ -402,14 +402,6 @@ watch(
 
 <template>
   <section class="page">
-    <div class="panel">
-      <p class="eyebrow">Feed</p>
-      <h2>Posts, threads, and privacy rules</h2>
-      <p>
-        Browse the latest posts, open comment threads directly in the feed, and keep replies intentionally capped at two levels while the data model stays ready for deeper trees later.
-      </p>
-    </div>
-
     <p v-if="requestError" class="form-error">{{ requestError }}</p>
 
     <div v-if="!isAuthenticated" class="panel">
@@ -422,14 +414,6 @@ watch(
     <template v-else>
       <div class="feed-layout">
         <section class="page">
-          <div class="panel panel--inset">
-            <p class="eyebrow">Posting flow</p>
-            <h3>Use the + action</h3>
-            <p>
-              The feed is now focused on reading and discussion. Use the `+` icon in the side rail to publish a new post.
-            </p>
-          </div>
-
           <div class="feed-header">
             <h3>Latest posts</h3>
             <p>{{ isLoading ? "Refreshing the feed..." : `${posts.length} visible posts` }}</p>

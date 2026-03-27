@@ -190,7 +190,6 @@ watch(
           :to="item.to"
           class="shell__icon-link"
           :class="{ 'shell__icon-link--active': isActive(item) }"
-          :title="`${item.label}: ${item.description}`"
         >
           <AppIcon :name="item.icon" :size="26" />
           <span class="shell__icon-details">

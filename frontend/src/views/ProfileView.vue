@@ -54,6 +54,9 @@ const requestLoading = reactive({})
 const removeRealtimeListeners = []
 const followRequestsSection = ref(null)
 const activeThemePreference = computed(() => currentProfile.value?.themePreference || store.state.themePreference)
+const hasVisibilityChanges = computed(
+  () => Boolean(currentProfile.value) && privacyForm.visibility !== (currentProfile.value?.profileVisibility || "public")
+)
 const profileInitials = computed(() => {
   const user = currentProfile.value
   if (!user) {
@@ -92,7 +95,7 @@ async function loadFollowRequests() {
 }
 
 async function saveProfileVisibility() {
-  if (!currentProfile.value) {
+  if (!currentProfile.value || !hasVisibilityChanges.value) {
     return
   }
 
@@ -350,7 +353,12 @@ onBeforeUnmount(() => {
               <option value="public">Public account</option>
               <option value="private">Private account</option>
             </select>
-            <button type="button" class="button" :disabled="isSavingPrivacy" @click="saveProfileVisibility">
+            <button
+              type="button"
+              class="button"
+              :disabled="isSavingPrivacy || !hasVisibilityChanges"
+              @click="saveProfileVisibility"
+            >
               {{ isSavingPrivacy ? "Saving..." : "Save visibility" }}
             </button>
           </div>
