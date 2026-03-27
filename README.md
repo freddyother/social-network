@@ -20,7 +20,9 @@ Vue 3 is a strong fit for this project because the social network needs a highly
 .
 ├── backend
 │   ├── README.md
-│   ├── server.go
+│   ├── cmd
+│   │   └── server
+│   │       └── main.go
 │   ├── internal
 │   └── pkg
 ├── frontend

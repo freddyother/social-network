@@ -1,21 +1,59 @@
 <script setup>
 import { computed, onMounted, ref, watch } from "vue"
-import { RouterLink, useRouter } from "vue-router"
+import { RouterLink, useRoute, useRouter } from "vue-router"
 
 import { fetchCurrentUser, fetchHealth, fetchMeta, fetchNotifications, isApiError, logoutUser } from "../../services/api"
 import { useAppStore } from "../../stores/app"
+import AppIcon from "../ui/AppIcon.vue"
 
-const links = [
-  { label: "Overview", to: "/" },
-  { label: "Feed", to: "/feed" },
-  { label: "Profile", to: "/profile/me" },
-  { label: "Groups", to: "/groups" },
-  { label: "Notifications", to: "/notifications" },
-  { label: "Chat", to: "/chat" }
+const navItems = [
+  {
+    label: "Home",
+    description: "Overview and product direction.",
+    to: "/",
+    icon: "overview"
+  },
+  {
+    label: "Feed",
+    description: "Browse posts, threads, and discover accounts.",
+    to: "/feed",
+    icon: "feed"
+  },
+  {
+    label: "Create",
+    description: "Publish a new carousel post.",
+    to: "/create",
+    icon: "create"
+  },
+  {
+    label: "Profile",
+    description: "Open your profile, privacy settings, and follow requests.",
+    to: "/profile/me",
+    icon: "profile"
+  },
+  {
+    label: "Groups",
+    description: "Explore the area reserved for communities and events.",
+    to: "/groups",
+    icon: "groups"
+  },
+  {
+    label: "Notifications",
+    description: "Review follow requests, approvals, comments, and replies.",
+    to: "/notifications",
+    icon: "notifications"
+  },
+  {
+    label: "Chat",
+    description: "Open the space reserved for private and group chat.",
+    to: "/chat",
+    icon: "chat"
+  }
 ]
 
 const store = useAppStore()
 const router = useRouter()
+const route = useRoute()
 const requestError = ref("")
 const authError = ref("")
 const isLoggingOut = ref(false)
@@ -29,6 +67,14 @@ const currentUserName = computed(() => {
 
   return user.nickname || `${user.firstName} ${user.lastName}`.trim() || user.email
 })
+
+function isActive(item) {
+  if (item.to === "/") {
+    return route.path === "/"
+  }
+
+  return route.path === item.to || route.path.startsWith(`${item.to}/`)
+}
 
 async function refreshNotifications() {
   if (!store.state.currentUser) {
@@ -104,44 +150,53 @@ watch(
 <template>
   <div class="shell">
     <aside class="shell__sidebar">
-      <p class="eyebrow">Vue 3 + Go</p>
-      <h1>Social Network</h1>
-      <p class="shell__lede">
-        SPA separated from the backend so it can scale cleanly into feed, groups, private profiles, WebSockets, and notifications.
-      </p>
+      <RouterLink to="/" class="shell__brand" title="Go to the home page">
+        <img src="/nexo-logo.png" alt="NEXO logo" class="shell__brand-logo" />
+        <span class="shell__brand-tagline">Share your world. your way.</span>
+      </RouterLink>
 
-      <nav class="shell__nav" aria-label="Primary navigation">
+      <nav class="shell__icon-rail" aria-label="Primary navigation">
         <RouterLink
-          v-for="link in links"
-          :key="link.to"
-          :to="link.to"
-          class="shell__nav-link"
+          v-for="item in navItems"
+          :key="item.to"
+          :to="item.to"
+          class="shell__icon-link"
+          :class="{ 'shell__icon-link--active': isActive(item) }"
+          :title="`${item.label}: ${item.description}`"
         >
-          <span>{{ link.label }}</span>
-          <span v-if="link.to === '/notifications' && unreadNotifications" class="shell__nav-badge">
+          <AppIcon :name="item.icon" :size="23" />
+          <span class="shell__icon-details">
+            <strong>{{ item.label }}</strong>
+            <small>{{ item.description }}</small>
+          </span>
+          <span
+            v-if="item.to === '/notifications' && unreadNotifications"
+            class="shell__icon-badge"
+          >
             {{ unreadNotifications }}
           </span>
         </RouterLink>
       </nav>
 
-      <div class="shell__status-card">
-        <span class="status-dot" :class="`status-dot--${store.state.apiStatus}`"></span>
-        <div>
-          <p class="status-label">API status</p>
-          <strong>{{ store.state.apiStatus }}</strong>
+      <div class="shell__sidebar-footer">
+        <div class="shell__status-pill" :title="`API status: ${store.state.apiStatus}`">
+          <span class="status-dot" :class="`status-dot--${store.state.apiStatus}`"></span>
         </div>
+        <p v-if="requestError" class="shell__error">
+          {{ requestError }}
+        </p>
       </div>
-
-      <p v-if="requestError" class="shell__error">
-        {{ requestError }}
-      </p>
     </aside>
 
     <div class="shell__content">
       <header class="shell__header">
         <div>
           <p class="eyebrow">Architecture</p>
-          <h2>{{ store.state.meta?.name || "Social Network" }}</h2>
+          <img
+            src="/nexo-logo.png"
+            :alt="store.state.meta?.name || 'NEXO'"
+            class="shell__header-logo"
+          />
         </div>
 
         <div class="shell__header-actions">

@@ -1,9 +1,8 @@
 <script setup>
-import { computed, onBeforeUnmount, reactive, ref, watch } from "vue"
+import { computed, reactive, ref, watch } from "vue"
 
 import {
   createComment,
-  createPost,
   fetchComments,
   fetchDiscoverUsers,
   fetchFeed,
@@ -15,27 +14,10 @@ import { useAppStore } from "../stores/app"
 const store = useAppStore()
 
 const isAuthenticated = computed(() => Boolean(store.state.currentUser))
-const composer = reactive({
-  title: "",
-  body: "",
-  privacy: "public",
-  images: []
-})
-
-const composerErrors = reactive({
-  title: "",
-  body: "",
-  privacy: "",
-  images: ""
-})
-
-const selectedPreviews = ref([])
 const posts = ref([])
 const suggestedUsers = ref([])
 const requestError = ref("")
-const composerError = ref("")
 const isLoading = ref(false)
-const isSubmitting = ref(false)
 const activeSlides = reactive({})
 const followLoading = reactive({})
 const expandedComments = reactive({})
@@ -45,8 +27,6 @@ const commentErrorByPost = reactive({})
 const commentForms = reactive({})
 const replyForms = reactive({})
 const commentSubmitting = reactive({})
-
-const hasPrivateAccount = computed(() => store.state.currentUser?.profileVisibility === "private")
 
 function displayName(user) {
   if (!user) {
@@ -105,35 +85,6 @@ function ensureReplyForm(postId, commentId) {
   }
 
   return replyForms[key]
-}
-
-function clearComposerErrors() {
-  composerError.value = ""
-  Object.keys(composerErrors).forEach((key) => {
-    composerErrors[key] = ""
-  })
-}
-
-function syncSelectedImages(files) {
-  selectedPreviews.value.forEach((preview) => URL.revokeObjectURL(preview.url))
-  selectedPreviews.value = files.map((file) => ({
-    name: file.name,
-    url: URL.createObjectURL(file)
-  }))
-}
-
-function handleImageSelection(event) {
-  const files = Array.from(event.target.files || [])
-  composer.images = files
-  syncSelectedImages(files)
-}
-
-function resetComposer() {
-  composer.title = ""
-  composer.body = ""
-  composer.privacy = "public"
-  composer.images = []
-  syncSelectedImages([])
 }
 
 async function loadFeedData() {
@@ -209,37 +160,6 @@ function toggleReplyForm(postId, commentId) {
   form.open = !form.open
   if (!form.open) {
     form.body = ""
-  }
-}
-
-async function submitPost() {
-  clearComposerErrors()
-  isSubmitting.value = true
-
-  try {
-    const post = await createPost({
-      title: composer.title,
-      body: composer.body,
-      privacy: composer.privacy,
-      images: composer.images
-    })
-
-    posts.value = [{ ...post, commentsCount: post.commentsCount || 0 }, ...posts.value]
-    activeSlides[post.id] = 0
-    ensureCommentState(post.id)
-    resetComposer()
-  } catch (error) {
-    if (isApiError(error)) {
-      composerError.value = error.message
-      const fieldErrors = error.payload?.fields || {}
-      Object.keys(composerErrors).forEach((key) => {
-        composerErrors[key] = fieldErrors[key] || ""
-      })
-    } else {
-      composerError.value = "Could not publish the post right now."
-    }
-  } finally {
-    isSubmitting.value = false
   }
 }
 
@@ -343,10 +263,6 @@ watch(
   },
   { immediate: true }
 )
-
-onBeforeUnmount(() => {
-  selectedPreviews.value.forEach((preview) => URL.revokeObjectURL(preview.url))
-})
 </script>
 
 <template>
@@ -355,7 +271,7 @@ onBeforeUnmount(() => {
       <p class="eyebrow">Feed</p>
       <h2>Posts, threads, and privacy rules</h2>
       <p>
-        Publish multi-image posts, open comment threads directly in the feed, and keep replies intentionally capped at two levels while the data model stays ready for deeper trees later.
+        Browse the latest posts, open comment threads directly in the feed, and keep replies intentionally capped at two levels while the data model stays ready for deeper trees later.
       </p>
     </div>
 
@@ -364,78 +280,186 @@ onBeforeUnmount(() => {
     <div v-if="!isAuthenticated" class="panel">
       <h3>Sign in to unlock the feed</h3>
       <p>
-        The personalized feed, follow graph, carousel composer, and threaded comments are only available after authentication.
+        The personalized feed, follow graph, dedicated create flow, and threaded comments are only available after authentication.
       </p>
     </div>
 
     <template v-else>
       <div class="feed-layout">
-        <section class="panel feed-composer">
-          <p class="eyebrow">Create post</p>
-          <h3>Share a moment</h3>
-          <form class="stack-form" @submit.prevent="submitPost">
-            <label>
-              <span>Title</span>
-              <input
-                v-model.trim="composer.title"
-                type="text"
-                placeholder="Golden hour in Lisbon"
-                :aria-invalid="Boolean(composerErrors.title)"
-                required
-              />
-              <p v-if="composerErrors.title" class="form-error">{{ composerErrors.title }}</p>
-            </label>
-
-            <label>
-              <span>Caption</span>
-              <textarea
-                v-model.trim="composer.body"
-                rows="4"
-                placeholder="What made this post worth remembering?"
-                :aria-invalid="Boolean(composerErrors.body)"
-                required
-              ></textarea>
-              <p v-if="composerErrors.body" class="form-error">{{ composerErrors.body }}</p>
-            </label>
-
-            <div class="feed-composer__row">
-              <label>
-                <span>Post privacy</span>
-                <select v-model="composer.privacy">
-                  <option value="public">Visible to everyone</option>
-                  <option value="followers">Followers only</option>
-                </select>
-                <p v-if="composerErrors.privacy" class="form-error">{{ composerErrors.privacy }}</p>
-              </label>
-
-              <label>
-                <span>Images</span>
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif"
-                  multiple
-                  @change="handleImageSelection"
-                />
-                <p v-if="composerErrors.images" class="form-error">{{ composerErrors.images }}</p>
-              </label>
-            </div>
-
-            <p class="feed-note">
-              {{ hasPrivateAccount ? "Your account is private, so followers are required to see any post." : "Public accounts can still mark individual posts as followers-only." }}
+        <section class="page">
+          <div class="panel panel--inset">
+            <p class="eyebrow">Posting flow</p>
+            <h3>Use the + action</h3>
+            <p>
+              The feed is now focused on reading and discussion. Use the `+` icon in the side rail to publish a new post.
             </p>
+          </div>
 
-            <div v-if="selectedPreviews.length" class="preview-strip">
-              <figure v-for="preview in selectedPreviews" :key="preview.url" class="preview-strip__item">
-                <img :src="preview.url" :alt="preview.name" />
-              </figure>
+          <div class="feed-header">
+            <h3>Latest posts</h3>
+            <p>{{ isLoading ? "Refreshing the feed..." : `${posts.length} visible posts` }}</p>
+          </div>
+
+          <article v-for="post in posts" :key="post.id" class="panel post-card">
+            <header class="post-card__header">
+              <div>
+                <p class="eyebrow">Post</p>
+                <h3>{{ post.title }}</h3>
+                <p class="post-card__meta">
+                  <strong>{{ displayName(post.author) }}</strong>
+                  <span>{{ formatDate(post.createdAt) }}</span>
+                  <span class="badge">{{ post.privacy }}</span>
+                  <span class="badge badge--soft">{{ post.author.profileVisibility }}</span>
+                  <span class="badge badge--neutral">{{ commentCountLabel(post.commentsCount || 0) }}</span>
+                </p>
+              </div>
+              <div class="post-card__timestamps">
+                <span>Created {{ formatDate(post.createdAt) }}</span>
+                <span v-if="post.updatedAt !== post.createdAt">Updated {{ formatDate(post.updatedAt) }}</span>
+              </div>
+            </header>
+
+            <p class="post-card__body">{{ post.body }}</p>
+
+            <div v-if="post.media?.length" class="carousel">
+              <div class="carousel__frame">
+                <img
+                  :src="post.media[currentSlide(post)].url"
+                  :alt="`${post.title} image ${currentSlide(post) + 1}`"
+                  class="carousel__image"
+                />
+              </div>
+
+              <div v-if="post.media.length > 1" class="carousel__controls">
+                <button type="button" class="button button--ghost" @click="previousSlide(post)">
+                  Prev
+                </button>
+                <div class="carousel__dots">
+                  <button
+                    v-for="(media, index) in post.media"
+                    :key="media.id"
+                    type="button"
+                    class="carousel__dot"
+                    :class="{ 'carousel__dot--active': index === currentSlide(post) }"
+                    @click="setSlide(post, index)"
+                  ></button>
+                </div>
+                <button type="button" class="button button--ghost" @click="nextSlide(post)">
+                  Next
+                </button>
+              </div>
             </div>
 
-            <p v-if="composerError" class="form-error">{{ composerError }}</p>
+            <section class="post-comments">
+              <div class="post-comments__header">
+                <div>
+                  <strong>Comments</strong>
+                  <p>{{ commentCountLabel(post.commentsCount || 0) }}</p>
+                </div>
+                <button type="button" class="button button--ghost button--small" @click="toggleComments(post)">
+                  {{ expandedComments[post.id] ? "Hide thread" : "Open thread" }}
+                </button>
+              </div>
 
-            <button type="submit" class="button" :disabled="isSubmitting">
-              {{ isSubmitting ? "Publishing..." : "Publish post" }}
-            </button>
-          </form>
+              <div v-if="expandedComments[post.id]" class="comment-thread">
+                <form class="comment-composer" @submit.prevent="submitComment(post)">
+                  <textarea
+                    v-model.trim="commentForms[post.id].body"
+                    rows="2"
+                    placeholder="Add a comment to this post"
+                  ></textarea>
+                  <div class="comment-composer__actions">
+                    <p class="feed-note">Replies are limited to two levels for now.</p>
+                    <button
+                      type="submit"
+                      class="button button--small"
+                      :disabled="commentSubmitting[post.id]"
+                    >
+                      {{ commentSubmitting[post.id] ? "Posting..." : "Comment" }}
+                    </button>
+                  </div>
+                </form>
+
+                <p v-if="commentErrorByPost[post.id]" class="form-error">{{ commentErrorByPost[post.id] }}</p>
+                <p v-if="commentsLoading[post.id]" class="feed-note">Loading comments...</p>
+
+                <div v-else-if="commentsByPost[post.id]?.length" class="comment-stack">
+                  <article v-for="comment in commentsByPost[post.id]" :key="comment.id" class="comment-card">
+                    <header class="comment-card__header">
+                      <strong>{{ displayName(comment.author) }}</strong>
+                      <span>{{ formatDate(comment.createdAt) }}</span>
+                    </header>
+                    <p class="comment-card__body">{{ comment.body }}</p>
+                    <div class="comment-card__actions">
+                      <button
+                        type="button"
+                        class="button button--ghost button--small"
+                        @click="toggleReplyForm(post.id, comment.id)"
+                      >
+                        {{
+                          replyForms[replyKey(post.id, comment.id)]?.open
+                            ? "Cancel reply"
+                            : "Reply"
+                        }}
+                      </button>
+                      <span class="feed-note">
+                        {{ comment.replies?.length ? `${comment.replies.length} replies` : "No replies yet" }}
+                      </span>
+                    </div>
+
+                    <form
+                      v-if="replyForms[replyKey(post.id, comment.id)]?.open"
+                      class="comment-composer comment-composer--reply"
+                      @submit.prevent="submitComment(post, comment)"
+                    >
+                      <textarea
+                        v-model.trim="replyForms[replyKey(post.id, comment.id)].body"
+                        rows="2"
+                        placeholder="Reply to this comment"
+                      ></textarea>
+                      <div class="comment-composer__actions">
+                        <p class="feed-note">Second level only in the current UI.</p>
+                        <button
+                          type="submit"
+                          class="button button--small"
+                          :disabled="commentSubmitting[replyKey(post.id, comment.id)]"
+                        >
+                          {{
+                            commentSubmitting[replyKey(post.id, comment.id)]
+                              ? "Posting..."
+                              : "Reply"
+                          }}
+                        </button>
+                      </div>
+                    </form>
+
+                    <div v-if="comment.replies?.length" class="reply-stack">
+                      <article
+                        v-for="reply in comment.replies"
+                        :key="reply.id"
+                        class="comment-card comment-card--reply"
+                      >
+                        <header class="comment-card__header">
+                          <strong>{{ displayName(reply.author) }}</strong>
+                          <span>{{ formatDate(reply.createdAt) }}</span>
+                        </header>
+                        <p class="comment-card__body">{{ reply.body }}</p>
+                      </article>
+                    </div>
+                  </article>
+                </div>
+
+                <p v-else class="feed-note">
+                  No comments yet. Start the thread with the first one.
+                </p>
+              </div>
+            </section>
+          </article>
+
+          <div v-if="!posts.length && !isLoading" class="panel">
+            <h3>Your feed is empty for now</h3>
+            <p>Use the `+` action to create the first post or follow another public account to start filling this page.</p>
+          </div>
         </section>
 
         <aside class="feed-side">
@@ -471,174 +495,6 @@ onBeforeUnmount(() => {
           </section>
         </aside>
       </div>
-
-      <section class="page">
-        <div class="feed-header">
-          <h3>Latest posts</h3>
-          <p>{{ isLoading ? "Refreshing the feed..." : `${posts.length} visible posts` }}</p>
-        </div>
-
-        <article v-for="post in posts" :key="post.id" class="panel post-card">
-          <header class="post-card__header">
-            <div>
-              <p class="eyebrow">Post</p>
-              <h3>{{ post.title }}</h3>
-              <p class="post-card__meta">
-                <strong>{{ displayName(post.author) }}</strong>
-                <span>{{ formatDate(post.createdAt) }}</span>
-                <span class="badge">{{ post.privacy }}</span>
-                <span class="badge badge--soft">{{ post.author.profileVisibility }}</span>
-                <span class="badge badge--neutral">{{ commentCountLabel(post.commentsCount || 0) }}</span>
-              </p>
-            </div>
-            <div class="post-card__timestamps">
-              <span>Created {{ formatDate(post.createdAt) }}</span>
-              <span v-if="post.updatedAt !== post.createdAt">Updated {{ formatDate(post.updatedAt) }}</span>
-            </div>
-          </header>
-
-          <p class="post-card__body">{{ post.body }}</p>
-
-          <div v-if="post.media?.length" class="carousel">
-            <div class="carousel__frame">
-              <img
-                :src="post.media[currentSlide(post)].url"
-                :alt="`${post.title} image ${currentSlide(post) + 1}`"
-                class="carousel__image"
-              />
-            </div>
-
-            <div v-if="post.media.length > 1" class="carousel__controls">
-              <button type="button" class="button button--ghost" @click="previousSlide(post)">
-                Prev
-              </button>
-              <div class="carousel__dots">
-                <button
-                  v-for="(media, index) in post.media"
-                  :key="media.id"
-                  type="button"
-                  class="carousel__dot"
-                  :class="{ 'carousel__dot--active': index === currentSlide(post) }"
-                  @click="setSlide(post, index)"
-                ></button>
-              </div>
-              <button type="button" class="button button--ghost" @click="nextSlide(post)">
-                Next
-              </button>
-            </div>
-          </div>
-
-          <section class="post-comments">
-            <div class="post-comments__header">
-              <div>
-                <strong>Comments</strong>
-                <p>{{ commentCountLabel(post.commentsCount || 0) }}</p>
-              </div>
-              <button type="button" class="button button--ghost button--small" @click="toggleComments(post)">
-                {{ expandedComments[post.id] ? "Hide thread" : "Open thread" }}
-              </button>
-            </div>
-
-            <div v-if="expandedComments[post.id]" class="comment-thread">
-              <form class="comment-composer" @submit.prevent="submitComment(post)">
-                <textarea
-                  v-model.trim="commentForms[post.id].body"
-                  rows="2"
-                  placeholder="Add a comment to this post"
-                ></textarea>
-                <div class="comment-composer__actions">
-                  <p class="feed-note">Replies are limited to two levels for now.</p>
-                  <button
-                    type="submit"
-                    class="button button--small"
-                    :disabled="commentSubmitting[post.id]"
-                  >
-                    {{ commentSubmitting[post.id] ? "Posting..." : "Comment" }}
-                  </button>
-                </div>
-              </form>
-
-              <p v-if="commentErrorByPost[post.id]" class="form-error">{{ commentErrorByPost[post.id] }}</p>
-              <p v-if="commentsLoading[post.id]" class="feed-note">Loading comments...</p>
-
-              <div v-else-if="commentsByPost[post.id]?.length" class="comment-stack">
-                <article v-for="comment in commentsByPost[post.id]" :key="comment.id" class="comment-card">
-                  <header class="comment-card__header">
-                    <strong>{{ displayName(comment.author) }}</strong>
-                    <span>{{ formatDate(comment.createdAt) }}</span>
-                  </header>
-                  <p class="comment-card__body">{{ comment.body }}</p>
-                  <div class="comment-card__actions">
-                    <button
-                      type="button"
-                      class="button button--ghost button--small"
-                      @click="toggleReplyForm(post.id, comment.id)"
-                    >
-                      {{
-                        replyForms[replyKey(post.id, comment.id)]?.open
-                          ? "Cancel reply"
-                          : "Reply"
-                      }}
-                    </button>
-                    <span class="feed-note">
-                      {{ comment.replies?.length ? `${comment.replies.length} replies` : "No replies yet" }}
-                    </span>
-                  </div>
-
-                  <form
-                    v-if="replyForms[replyKey(post.id, comment.id)]?.open"
-                    class="comment-composer comment-composer--reply"
-                    @submit.prevent="submitComment(post, comment)"
-                  >
-                    <textarea
-                      v-model.trim="replyForms[replyKey(post.id, comment.id)].body"
-                      rows="2"
-                      placeholder="Reply to this comment"
-                    ></textarea>
-                    <div class="comment-composer__actions">
-                      <p class="feed-note">Second level only in the current UI.</p>
-                      <button
-                        type="submit"
-                        class="button button--small"
-                        :disabled="commentSubmitting[replyKey(post.id, comment.id)]"
-                      >
-                        {{
-                          commentSubmitting[replyKey(post.id, comment.id)]
-                            ? "Posting..."
-                            : "Reply"
-                        }}
-                      </button>
-                    </div>
-                  </form>
-
-                  <div v-if="comment.replies?.length" class="reply-stack">
-                    <article
-                      v-for="reply in comment.replies"
-                      :key="reply.id"
-                      class="comment-card comment-card--reply"
-                    >
-                      <header class="comment-card__header">
-                        <strong>{{ displayName(reply.author) }}</strong>
-                        <span>{{ formatDate(reply.createdAt) }}</span>
-                      </header>
-                      <p class="comment-card__body">{{ reply.body }}</p>
-                    </article>
-                  </div>
-                </article>
-              </div>
-
-              <p v-else class="feed-note">
-                No comments yet. Start the thread with the first one.
-              </p>
-            </div>
-          </section>
-        </article>
-
-        <div v-if="!posts.length && !isLoading" class="panel">
-          <h3>Your feed is empty for now</h3>
-          <p>Create the first post or follow another public account to start filling this page.</p>
-        </div>
-      </section>
     </template>
   </section>
 </template>

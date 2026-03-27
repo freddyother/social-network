@@ -46,7 +46,7 @@ func NewRouter(cfg config.Config, db *sql.DB) stdlibhttp.Handler {
 	mux.Handle("GET /uploads/", stdlibhttp.StripPrefix("/uploads/", stdlibhttp.FileServer(stdlibhttp.Dir(cfg.UploadsDir))))
 	mux.HandleFunc("GET /", func(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
 		response.JSON(w, stdlibhttp.StatusOK, map[string]any{
-			"name":        "social-network",
+			"name":        "NEXO",
 			"message":     "Go backend running",
 			"frontend":    "Vue 3 SPA",
 			"api_version": "v1",

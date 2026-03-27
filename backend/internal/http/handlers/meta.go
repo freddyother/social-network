@@ -17,7 +17,7 @@ func NewMetaHandler(cfg config.Config) MetaHandler {
 
 func (h MetaHandler) Handle(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
 	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
-		"name":       "social-network",
+		"name":       "NEXO",
 		"stack":      []string{"go", "postgresql", "vue-3"},
 		"app_env":    h.cfg.AppEnv,
 		"api_prefix": "/api/v1",

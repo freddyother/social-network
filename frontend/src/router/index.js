@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router"
 
 import ChatView from "../views/ChatView.vue"
+import CreatePostView from "../views/CreatePostView.vue"
 import FeedView from "../views/FeedView.vue"
 import GroupsView from "../views/GroupsView.vue"
 import HomeView from "../views/HomeView.vue"
@@ -12,6 +13,7 @@ import RegisterView from "../views/RegisterView.vue"
 const routes = [
   { path: "/", name: "home", component: HomeView },
   { path: "/feed", name: "feed", component: FeedView },
+  { path: "/create", name: "create-post", component: CreatePostView },
   { path: "/profile/:handle?", name: "profile", component: ProfileView, props: true },
   { path: "/groups", name: "groups", component: GroupsView },
   { path: "/notifications", name: "notifications", component: NotificationsView },

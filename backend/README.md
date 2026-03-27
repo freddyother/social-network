@@ -7,7 +7,7 @@ This backend uses `PostgreSQL`
 
 ## What This Foundation Includes
 
-- `server.go` as the entry point
+- `cmd/server/main.go` as the entry point
 - HTTP server with graceful shutdown
 - `CORS` middleware ready for cookies and sessions
 - `PostgreSQL` connection setup
@@ -21,7 +21,9 @@ This backend uses `PostgreSQL`
 
 ```text
 backend
-├── server.go
+├── cmd
+│   └── server
+│       └── main.go
 ├── internal
 │   ├── app
 │   ├── config
@@ -53,7 +55,7 @@ SESSION_COOKIE_SECURE=false
 
 ```bash
 go mod tidy
-go run ./server.go
+go run ./cmd/server
 ```
 
 ## Base Endpoints

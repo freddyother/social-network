@@ -31,7 +31,7 @@ const milestones = [
   <section class="page">
     <div class="hero-panel">
       <p class="eyebrow">Recommended choice</p>
-      <h2>Vue 3 is a very strong choice for this social network.</h2>
+      <img src="/nexo-logo.png" alt="NEXO logo" class="hero-panel__logo" />
       <p>
         The main reason is simple: this project needs a complex, maintainable SPA, not a framework that tries to absorb the backend as well.
       </p>
