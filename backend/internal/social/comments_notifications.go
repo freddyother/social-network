@@ -20,6 +20,10 @@ type CreateCommentInput struct {
 	ParentCommentID string
 }
 
+type UpdateCommentInput struct {
+	Body string
+}
+
 type Comment struct {
 	ID              string     `json:"id"`
 	Body            string     `json:"body"`
@@ -67,6 +71,20 @@ type userIdentity struct {
 	LastName  string
 	Nickname  string
 	Email     string
+}
+
+type editableComment struct {
+	AuthorID        string
+	ParentCommentID string
+	CreatedAt       time.Time
+}
+
+func (c editableComment) Depth() int {
+	if c.ParentCommentID == "" {
+		return 0
+	}
+
+	return 1
 }
 
 func (u userIdentity) DisplayName() string {
@@ -357,6 +375,69 @@ func (s Service) CreateComment(ctx context.Context, author auth.User, postID str
 	return comment, nil
 }
 
+func (s Service) UpdateComment(ctx context.Context, author auth.User, postID, commentID string, input UpdateCommentInput) (Comment, error) {
+	normalizedInput, err := normalizeUpdateCommentInput(input)
+	if err != nil {
+		return Comment{}, err
+	}
+
+	if _, err := s.loadVisiblePost(ctx, s.db, author.ID, postID); err != nil {
+		return Comment{}, err
+	}
+
+	existingComment, err := s.loadCommentEditorState(ctx, s.db, postID, commentID)
+	if err != nil {
+		return Comment{}, err
+	}
+
+	if existingComment.AuthorID != author.ID {
+		return Comment{}, ErrForbidden
+	}
+
+	var updatedAt time.Time
+	if err := s.db.QueryRowContext(
+		ctx,
+		`
+			UPDATE comments
+			SET body = $1, updated_at = NOW()
+			WHERE id = $2
+			RETURNING updated_at
+		`,
+		normalizedInput.Body,
+		commentID,
+	).Scan(&updatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Comment{}, ErrNotFound
+		}
+
+		return Comment{}, fmt.Errorf("update comment: %w", err)
+	}
+
+	comment := Comment{
+		ID:              commentID,
+		Body:            normalizedInput.Body,
+		CreatedAt:       existingComment.CreatedAt,
+		UpdatedAt:       updatedAt,
+		ParentCommentID: existingComment.ParentCommentID,
+		Depth:           existingComment.Depth(),
+		Author: PostAuthor{
+			ID:                author.ID,
+			FirstName:         author.FirstName,
+			LastName:          author.LastName,
+			Nickname:          author.Nickname,
+			ProfileVisibility: author.ProfileVisibility,
+		},
+		Replies: []Comment{},
+	}
+
+	s.publisher.PublishToPost(postID, "comment.updated", CommentEvent{
+		PostID:  postID,
+		Comment: comment,
+	})
+
+	return comment, nil
+}
+
 func (s Service) Notifications(ctx context.Context, userID string) ([]Notification, error) {
 	rows, err := s.db.QueryContext(
 		ctx,
@@ -606,27 +687,71 @@ func (s Service) insertNotification(ctx context.Context, executor sqlExecutor, u
 	}, nil
 }
 
-func normalizeCreateCommentInput(input CreateCommentInput) (CreateCommentInput, error) {
-	normalized := CreateCommentInput{
-		Body:            strings.TrimSpace(input.Body),
-		ParentCommentID: strings.TrimSpace(input.ParentCommentID),
+func (s Service) loadCommentEditorState(ctx context.Context, reader sqlReader, postID, commentID string) (editableComment, error) {
+	var comment editableComment
+	var parentCommentID sql.NullString
+	if err := reader.QueryRowContext(
+		ctx,
+		`
+			SELECT author_id, parent_comment_id, created_at
+			FROM comments
+			WHERE id = $1 AND post_id = $2
+		`,
+		commentID,
+		postID,
+	).Scan(&comment.AuthorID, &parentCommentID, &comment.CreatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return editableComment{}, ErrNotFound
+		}
+
+		return editableComment{}, fmt.Errorf("load comment editor state: %w", err)
 	}
 
+	comment.ParentCommentID = nullStringValue(parentCommentID)
+	return comment, nil
+}
+
+func normalizeCreateCommentInput(input CreateCommentInput) (CreateCommentInput, error) {
+	body, err := normalizeCommentBody(input.Body)
+	if err != nil {
+		return CreateCommentInput{}, err
+	}
+
+	return CreateCommentInput{
+		Body:            body,
+		ParentCommentID: strings.TrimSpace(input.ParentCommentID),
+	}, nil
+}
+
+func normalizeUpdateCommentInput(input UpdateCommentInput) (UpdateCommentInput, error) {
+	body, err := normalizeCommentBody(input.Body)
+	if err != nil {
+		return UpdateCommentInput{}, err
+	}
+
+	return UpdateCommentInput{
+		Body: body,
+	}, nil
+}
+
+func normalizeCommentBody(body string) (string, error) {
+	normalizedBody := strings.TrimSpace(body)
+
 	fieldErrors := make(map[string]string)
-	if normalized.Body == "" {
+	if normalizedBody == "" {
 		fieldErrors["body"] = "Comment text is required."
-	} else if len(normalized.Body) > maxCommentBodyLength {
+	} else if len(normalizedBody) > maxCommentBodyLength {
 		fieldErrors["body"] = "Comments must be 1000 characters or fewer."
 	}
 
 	if len(fieldErrors) > 0 {
-		return CreateCommentInput{}, &ValidationError{
+		return "", &ValidationError{
 			Message: "Please correct the comment details.",
 			Fields:  fieldErrors,
 		}
 	}
 
-	return normalized, nil
+	return normalizedBody, nil
 }
 
 func displayName(firstName, lastName, nickname, fallback string) string {

@@ -15,6 +15,7 @@ import (
 
 type socialService interface {
 	CreatePost(ctx context.Context, author auth.User, input social.CreatePostInput) (social.Post, error)
+	UpdatePost(ctx context.Context, author auth.User, postID string, input social.UpdatePostInput) (social.Post, error)
 	Feed(ctx context.Context, viewerID string) ([]social.Post, error)
 	Conversations(ctx context.Context, userID string) ([]social.ConversationSummary, error)
 	Conversation(ctx context.Context, viewerID, partnerID string) (social.ConversationThread, error)
@@ -22,6 +23,7 @@ type socialService interface {
 	MarkConversationRead(ctx context.Context, viewerID, partnerID string) (social.ConversationReadResult, error)
 	Comments(ctx context.Context, viewerID, postID string) ([]social.Comment, error)
 	CreateComment(ctx context.Context, author auth.User, postID string, input social.CreateCommentInput) (social.Comment, error)
+	UpdateComment(ctx context.Context, author auth.User, postID, commentID string, input social.UpdateCommentInput) (social.Comment, error)
 	DiscoverUsers(ctx context.Context, viewerID string) ([]social.SuggestedUser, error)
 	FollowUser(ctx context.Context, followerID, followeeID string) (social.FollowActionResult, error)
 	IncomingFollowRequests(ctx context.Context, userID string) ([]social.FollowRequest, error)
@@ -180,6 +182,42 @@ func (h SocialHandler) HandleCreatePost(w stdlibhttp.ResponseWriter, r *stdlibht
 	})
 }
 
+func (h SocialHandler) HandleUpdatePost(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	currentUser, ok := h.requireCurrentUser(w, r)
+	if !ok {
+		return
+	}
+
+	var payload struct {
+		Title   string `json:"title"`
+		Body    string `json:"body"`
+		Privacy string `json:"privacy"`
+	}
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdlibhttp.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	post, err := h.service.UpdatePost(
+		r.Context(),
+		*currentUser,
+		strings.TrimSpace(r.PathValue("postID")),
+		social.UpdatePostInput{
+			Title:   payload.Title,
+			Body:    payload.Body,
+			Privacy: payload.Privacy,
+		},
+	)
+	if err != nil {
+		h.handleSocialError(w, err)
+		return
+	}
+
+	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
+		"post": post,
+	})
+}
+
 func (h SocialHandler) HandleUpdateAvatar(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
 	currentUser, ok := h.requireCurrentUser(w, r)
 	if !ok {
@@ -259,6 +297,39 @@ func (h SocialHandler) HandleCreateComment(w stdlibhttp.ResponseWriter, r *stdli
 	}
 
 	response.JSON(w, stdlibhttp.StatusCreated, map[string]any{
+		"comment": comment,
+	})
+}
+
+func (h SocialHandler) HandleUpdateComment(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	currentUser, ok := h.requireCurrentUser(w, r)
+	if !ok {
+		return
+	}
+
+	var payload struct {
+		Body string `json:"body"`
+	}
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdlibhttp.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	comment, err := h.service.UpdateComment(
+		r.Context(),
+		*currentUser,
+		strings.TrimSpace(r.PathValue("postID")),
+		strings.TrimSpace(r.PathValue("commentID")),
+		social.UpdateCommentInput{
+			Body: payload.Body,
+		},
+	)
+	if err != nil {
+		h.handleSocialError(w, err)
+		return
+	}
+
+	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
 		"comment": comment,
 	})
 }

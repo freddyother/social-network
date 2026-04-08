@@ -40,6 +40,10 @@ type CommentEvent struct {
 	Comment Comment `json:"comment"`
 }
 
+type PostEvent struct {
+	Post Post `json:"post"`
+}
+
 type notificationDelivery struct {
 	UserID       string
 	Notification Notification

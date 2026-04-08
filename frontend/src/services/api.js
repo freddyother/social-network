@@ -187,9 +187,27 @@ export async function createPost(post) {
   return payload?.post || null
 }
 
+export async function updatePost(postId, post) {
+  const payload = await request(`/posts/${postId}`, {
+    method: "PATCH",
+    body: JSON.stringify(post)
+  })
+
+  return payload?.post || null
+}
+
 export async function createComment(postId, comment) {
   const payload = await request(`/posts/${postId}/comments`, {
     method: "POST",
+    body: JSON.stringify(comment)
+  })
+
+  return payload?.comment || null
+}
+
+export async function updateComment(postId, commentId, comment) {
+  const payload = await request(`/posts/${postId}/comments/${commentId}`, {
+    method: "PATCH",
     body: JSON.stringify(comment)
   })
 

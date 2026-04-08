@@ -56,6 +56,12 @@ type CreatePostInput struct {
 	Images  []*multipart.FileHeader
 }
 
+type UpdatePostInput struct {
+	Title   string
+	Body    string
+	Privacy string
+}
+
 type PostAuthor struct {
 	ID                string `json:"id"`
 	FirstName         string `json:"firstName"`
@@ -107,6 +113,11 @@ type Service struct {
 	uploadsDir    string
 	publicBaseURL string
 	publisher     EventPublisher
+}
+
+type editablePost struct {
+	AuthorID  string
+	CreatedAt time.Time
 }
 
 type AvatarUploadInput struct {
@@ -232,6 +243,77 @@ func (s Service) CreatePost(ctx context.Context, author auth.User, input CreateP
 		},
 		Media: s.buildPostMedia(savedMedia),
 	}, nil
+}
+
+func (s Service) UpdatePost(ctx context.Context, author auth.User, postID string, input UpdatePostInput) (Post, error) {
+	normalizedInput, err := normalizeUpdatePostInput(input)
+	if err != nil {
+		return Post{}, err
+	}
+
+	existingPost, err := s.loadPostEditorState(ctx, s.db, postID)
+	if err != nil {
+		return Post{}, err
+	}
+
+	if existingPost.AuthorID != author.ID {
+		return Post{}, ErrForbidden
+	}
+
+	var updatedAt time.Time
+	if err := s.db.QueryRowContext(
+		ctx,
+		`
+			UPDATE posts
+			SET title = $1, body = $2, privacy = $3, updated_at = NOW()
+			WHERE id = $4
+			RETURNING updated_at
+		`,
+		normalizedInput.Title,
+		normalizedInput.Body,
+		normalizedInput.Privacy,
+		postID,
+	).Scan(&updatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Post{}, ErrNotFound
+		}
+
+		return Post{}, fmt.Errorf("update post: %w", err)
+	}
+
+	mediaByPostID, err := s.loadPostMedia(ctx, []string{postID})
+	if err != nil {
+		return Post{}, err
+	}
+
+	commentCountsByPostID, err := s.loadCommentCounts(ctx, []string{postID})
+	if err != nil {
+		return Post{}, err
+	}
+
+	post := Post{
+		ID:        postID,
+		Title:     normalizedInput.Title,
+		Body:      normalizedInput.Body,
+		Privacy:   normalizedInput.Privacy,
+		CreatedAt: existingPost.CreatedAt,
+		UpdatedAt: updatedAt,
+		Author: PostAuthor{
+			ID:                author.ID,
+			FirstName:         author.FirstName,
+			LastName:          author.LastName,
+			Nickname:          author.Nickname,
+			ProfileVisibility: author.ProfileVisibility,
+		},
+		Media:         mediaByPostID[postID],
+		CommentsCount: commentCountsByPostID[postID],
+	}
+
+	s.publisher.PublishToPost(postID, "post.updated", PostEvent{
+		Post: post,
+	})
+
+	return post, nil
 }
 
 func (s Service) Feed(ctx context.Context, viewerID string) ([]Post, error) {
@@ -962,6 +1044,27 @@ func (s Service) buildPostMedia(saved []savedMedia) []PostMedia {
 	return media
 }
 
+func (s Service) loadPostEditorState(ctx context.Context, reader sqlReader, postID string) (editablePost, error) {
+	var post editablePost
+	if err := reader.QueryRowContext(
+		ctx,
+		`
+			SELECT author_id, created_at
+			FROM posts
+			WHERE id = $1
+		`,
+		postID,
+	).Scan(&post.AuthorID, &post.CreatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return editablePost{}, ErrNotFound
+		}
+
+		return editablePost{}, fmt.Errorf("load post editor state: %w", err)
+	}
+
+	return post, nil
+}
+
 func (s Service) publicURL(storagePath string) string {
 	normalizedPath := strings.TrimLeft(filepath.ToSlash(storagePath), "/")
 	return s.publicBaseURL + "/uploads/" + normalizedPath
@@ -974,35 +1077,8 @@ type savedMedia struct {
 }
 
 func normalizeCreatePostInput(input CreatePostInput) (CreatePostInput, error) {
-	normalized := CreatePostInput{
-		Title:   strings.TrimSpace(input.Title),
-		Body:    strings.TrimSpace(input.Body),
-		Privacy: strings.ToLower(strings.TrimSpace(input.Privacy)),
-		Images:  input.Images,
-	}
-
-	fieldErrors := make(map[string]string)
-	if normalized.Title == "" {
-		fieldErrors["title"] = "Title is required."
-	} else if len(normalized.Title) > 120 {
-		fieldErrors["title"] = "Title must be 120 characters or fewer."
-	}
-
-	if normalized.Body == "" {
-		fieldErrors["body"] = "Caption is required."
-	} else if len(normalized.Body) > 3000 {
-		fieldErrors["body"] = "Caption must be 3000 characters or fewer."
-	}
-
-	if normalized.Privacy == "" {
-		normalized.Privacy = "public"
-	}
-
-	if normalized.Privacy != "public" && normalized.Privacy != "followers" {
-		fieldErrors["privacy"] = "Privacy must be public or followers."
-	}
-
-	if len(normalized.Images) > maxPostImages {
+	title, body, privacy, fieldErrors := normalizePostFields(input.Title, input.Body, input.Privacy)
+	if len(input.Images) > maxPostImages {
 		fieldErrors["images"] = "You can upload up to 6 images per post."
 	}
 
@@ -1013,7 +1089,57 @@ func normalizeCreatePostInput(input CreatePostInput) (CreatePostInput, error) {
 		}
 	}
 
-	return normalized, nil
+	return CreatePostInput{
+		Title:   title,
+		Body:    body,
+		Privacy: privacy,
+		Images:  input.Images,
+	}, nil
+}
+
+func normalizeUpdatePostInput(input UpdatePostInput) (UpdatePostInput, error) {
+	title, body, privacy, fieldErrors := normalizePostFields(input.Title, input.Body, input.Privacy)
+	if len(fieldErrors) > 0 {
+		return UpdatePostInput{}, &ValidationError{
+			Message: "Please correct the post details.",
+			Fields:  fieldErrors,
+		}
+	}
+
+	return UpdatePostInput{
+		Title:   title,
+		Body:    body,
+		Privacy: privacy,
+	}, nil
+}
+
+func normalizePostFields(title, body, privacy string) (string, string, string, map[string]string) {
+	normalizedTitle := strings.TrimSpace(title)
+	normalizedBody := strings.TrimSpace(body)
+	normalizedPrivacy := strings.ToLower(strings.TrimSpace(privacy))
+
+	fieldErrors := make(map[string]string)
+	if normalizedTitle == "" {
+		fieldErrors["title"] = "Title is required."
+	} else if len(normalizedTitle) > 120 {
+		fieldErrors["title"] = "Title must be 120 characters or fewer."
+	}
+
+	if normalizedBody == "" {
+		fieldErrors["body"] = "Caption is required."
+	} else if len(normalizedBody) > 3000 {
+		fieldErrors["body"] = "Caption must be 3000 characters or fewer."
+	}
+
+	if normalizedPrivacy == "" {
+		normalizedPrivacy = "public"
+	}
+
+	if normalizedPrivacy != "public" && normalizedPrivacy != "followers" {
+		fieldErrors["privacy"] = "Privacy must be public or followers."
+	}
+
+	return normalizedTitle, normalizedBody, normalizedPrivacy, fieldErrors
 }
 
 func normalizeProfileVisibility(visibility string) (string, error) {

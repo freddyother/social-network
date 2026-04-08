@@ -8,7 +8,9 @@ import {
   fetchDiscoverUsers,
   fetchFeed,
   followUser,
-  isApiError
+  isApiError,
+  updateComment,
+  updatePost
 } from "../services/api"
 import { realtimeClient } from "../services/realtime"
 import { useAppStore } from "../stores/app"
@@ -18,6 +20,7 @@ const store = useAppStore()
 const route = useRoute()
 
 const isAuthenticated = computed(() => Boolean(store.state.currentUser))
+const currentUserId = computed(() => store.state.currentUser?.id || "")
 const posts = ref([])
 const suggestedUsers = ref([])
 const requestError = ref("")
@@ -31,6 +34,12 @@ const commentErrorByPost = reactive({})
 const commentForms = reactive({})
 const replyForms = reactive({})
 const commentSubmitting = reactive({})
+const postEditForms = reactive({})
+const postEditSaving = reactive({})
+const postEditErrorByPost = reactive({})
+const commentEditForms = reactive({})
+const commentEditSaving = reactive({})
+const commentEditErrors = reactive({})
 const removeRealtimeListeners = []
 const subscribedPostIds = new Set()
 
@@ -74,6 +83,20 @@ function shouldOpenCommentsFromRoute() {
   return String(rawValue || "").trim() === "1"
 }
 
+function canEditAuthor(author) {
+  return Boolean(author?.id && author.id === currentUserId.value)
+}
+
+function commentTimestampLabel(comment) {
+  if (!comment) {
+    return ""
+  }
+
+  return comment.updatedAt !== comment.createdAt
+    ? `Edited ${formatDate(comment.updatedAt)}`
+    : formatDate(comment.createdAt)
+}
+
 function unsubscribeAllPostRooms() {
   for (const postId of subscribedPostIds) {
     realtimeClient.unsubscribePost(postId)
@@ -100,6 +123,102 @@ function ensureCommentState(postId) {
   }
 }
 
+function ensurePostEditForm(post) {
+  if (!postEditForms[post.id]) {
+    postEditForms[post.id] = {
+      open: false,
+      title: "",
+      body: "",
+      privacy: "public"
+    }
+  }
+
+  if (!(post.id in postEditSaving)) {
+    postEditSaving[post.id] = false
+  }
+
+  if (!(post.id in postEditErrorByPost)) {
+    postEditErrorByPost[post.id] = ""
+  }
+
+  return postEditForms[post.id]
+}
+
+function syncPostEditForm(post, options = {}) {
+  const form = ensurePostEditForm(post)
+  if (options.preserveDraft && form.open) {
+    return form
+  }
+
+  form.title = post.title || ""
+  form.body = post.body || ""
+  form.privacy = post.privacy || "public"
+  form.open = false
+  return form
+}
+
+function closePostEdit(post) {
+  syncPostEditForm(post)
+  postEditErrorByPost[post.id] = ""
+}
+
+function togglePostEdit(post) {
+  const form = ensurePostEditForm(post)
+  if (form.open) {
+    closePostEdit(post)
+    return
+  }
+
+  syncPostEditForm(post)
+  form.open = true
+}
+
+function ensureCommentEditForm(comment) {
+  if (!commentEditForms[comment.id]) {
+    commentEditForms[comment.id] = {
+      open: false,
+      body: ""
+    }
+  }
+
+  if (!(comment.id in commentEditSaving)) {
+    commentEditSaving[comment.id] = false
+  }
+
+  if (!(comment.id in commentEditErrors)) {
+    commentEditErrors[comment.id] = ""
+  }
+
+  return commentEditForms[comment.id]
+}
+
+function syncCommentEditForm(comment, options = {}) {
+  const form = ensureCommentEditForm(comment)
+  if (options.preserveDraft && form.open) {
+    return form
+  }
+
+  form.body = comment.body || ""
+  form.open = false
+  return form
+}
+
+function closeCommentEdit(comment) {
+  syncCommentEditForm(comment)
+  commentEditErrors[comment.id] = ""
+}
+
+function toggleCommentEdit(comment) {
+  const form = ensureCommentEditForm(comment)
+  if (form.open) {
+    closeCommentEdit(comment)
+    return
+  }
+
+  syncCommentEditForm(comment)
+  form.open = true
+}
+
 function replyKey(postId, commentId) {
   return `${postId}:${commentId}`
 }
@@ -116,11 +235,93 @@ function ensureReplyForm(postId, commentId) {
   return replyForms[key]
 }
 
+function primeCommentThread(postId, comments) {
+  for (const comment of comments || []) {
+    ensureReplyForm(postId, comment.id)
+    syncCommentEditForm(comment, { preserveDraft: true })
+
+    for (const reply of comment.replies || []) {
+      syncCommentEditForm(reply, { preserveDraft: true })
+    }
+  }
+}
+
+function applyUpdatedPost(updatedPost) {
+  if (!updatedPost?.id) {
+    return
+  }
+
+  posts.value = posts.value.map((item) =>
+    item.id === updatedPost.id
+      ? {
+          ...item,
+          ...updatedPost,
+          commentsCount: updatedPost.commentsCount ?? item.commentsCount ?? 0
+        }
+      : item
+  )
+
+  const latestPost = posts.value.find((item) => item.id === updatedPost.id)
+  if (latestPost) {
+    syncPostEditForm(latestPost, { preserveDraft: true })
+  }
+}
+
+function applyUpdatedComment(postId, updatedComment) {
+  if (!postId || !updatedComment?.id) {
+    return false
+  }
+
+  ensureCommentState(postId)
+
+  let updated = false
+  commentsByPost[postId] = commentsByPost[postId].map((item) => {
+    if (item.id === updatedComment.id) {
+      updated = true
+      return {
+        ...item,
+        ...updatedComment,
+        replies: item.replies || []
+      }
+    }
+
+    let replyWasUpdated = false
+    const replies = (item.replies || []).map((reply) => {
+      if (reply.id !== updatedComment.id) {
+        return reply
+      }
+
+      replyWasUpdated = true
+      updated = true
+      return {
+        ...reply,
+        ...updatedComment
+      }
+    })
+
+    if (!replyWasUpdated) {
+      return item
+    }
+
+    return {
+      ...item,
+      replies
+    }
+  })
+
+  if (updated) {
+    syncCommentEditForm(updatedComment, { preserveDraft: true })
+  }
+
+  return updated
+}
+
 async function loadFeedData() {
   if (!isAuthenticated.value) {
     unsubscribeAllPostRooms()
     posts.value = []
     suggestedUsers.value = []
+    clearObject(activeSlides)
     clearObject(expandedComments)
     clearObject(commentsByPost)
     clearObject(commentsLoading)
@@ -128,6 +329,12 @@ async function loadFeedData() {
     clearObject(commentForms)
     clearObject(replyForms)
     clearObject(commentSubmitting)
+    clearObject(postEditForms)
+    clearObject(postEditSaving)
+    clearObject(postEditErrorByPost)
+    clearObject(commentEditForms)
+    clearObject(commentEditSaving)
+    clearObject(commentEditErrors)
     return
   }
 
@@ -141,6 +348,7 @@ async function loadFeedData() {
     posts.value = feedPosts
     suggestedUsers.value = discoverUsers
 
+    clearObject(activeSlides)
     clearObject(expandedComments)
     clearObject(commentsByPost)
     clearObject(commentsLoading)
@@ -148,10 +356,17 @@ async function loadFeedData() {
     clearObject(commentForms)
     clearObject(replyForms)
     clearObject(commentSubmitting)
+    clearObject(postEditForms)
+    clearObject(postEditSaving)
+    clearObject(postEditErrorByPost)
+    clearObject(commentEditForms)
+    clearObject(commentEditSaving)
+    clearObject(commentEditErrors)
 
     for (const post of feedPosts) {
       activeSlides[post.id] = 0
       ensureCommentState(post.id)
+      syncPostEditForm(post)
     }
 
     await focusPostFromRoute()
@@ -169,9 +384,7 @@ async function loadComments(postId) {
 
   try {
     commentsByPost[postId] = await fetchComments(postId)
-    for (const comment of commentsByPost[postId]) {
-      ensureReplyForm(postId, comment.id)
-    }
+    primeCommentThread(postId, commentsByPost[postId])
   } catch (error) {
     commentErrorByPost[postId] = error instanceof Error ? error.message : "Could not load comments."
   } finally {
@@ -201,6 +414,35 @@ function toggleReplyForm(postId, commentId) {
   form.open = !form.open
   if (!form.open) {
     form.body = ""
+  }
+}
+
+async function submitPostEdit(post) {
+  const form = ensurePostEditForm(post)
+  postEditSaving[post.id] = true
+  postEditErrorByPost[post.id] = ""
+
+  try {
+    const updatedPost = await updatePost(post.id, {
+      title: form.title,
+      body: form.body,
+      privacy: form.privacy
+    })
+
+    applyUpdatedPost(updatedPost)
+    syncPostEditForm(updatedPost)
+  } catch (error) {
+    if (isApiError(error)) {
+      postEditErrorByPost[post.id] =
+        error.payload?.fields?.title ||
+        error.payload?.fields?.body ||
+        error.payload?.fields?.privacy ||
+        error.message
+    } else {
+      postEditErrorByPost[post.id] = "Could not save the post right now."
+    }
+  } finally {
+    postEditSaving[post.id] = false
   }
 }
 
@@ -248,6 +490,31 @@ async function submitComment(post, parentComment = null) {
     }
   } finally {
     commentSubmitting[key] = false
+  }
+}
+
+async function submitCommentEdit(postId, comment) {
+  const form = ensureCommentEditForm(comment)
+  commentEditSaving[comment.id] = true
+  commentEditErrors[comment.id] = ""
+
+  try {
+    const updatedComment = await updateComment(postId, comment.id, {
+      body: form.body
+    })
+
+    applyUpdatedComment(postId, updatedComment)
+    syncCommentEditForm(updatedComment)
+  } catch (error) {
+    if (isApiError(error)) {
+      commentEditErrors[comment.id] =
+        error.payload?.fields?.body ||
+        error.message
+    } else {
+      commentEditErrors[comment.id] = "Could not save the comment right now."
+    }
+  } finally {
+    commentEditSaving[comment.id] = false
   }
 }
 
@@ -332,6 +599,7 @@ function insertLiveComment(postId, comment) {
   if (!comment.parentCommentId) {
     commentsByPost[postId] = [...commentsByPost[postId], comment]
     ensureReplyForm(postId, comment.id)
+    syncCommentEditForm(comment)
     return true
   }
 
@@ -346,6 +614,7 @@ function insertLiveComment(postId, comment) {
     }
 
     inserted = true
+    syncCommentEditForm(comment)
     return {
       ...item,
       replies: [...(item.replies || []), comment]
@@ -374,9 +643,31 @@ function handleLiveCommentEvent(event) {
   )
 }
 
+function handleLivePostUpdatedEvent(event) {
+  const updatedPost = event.payload?.post
+  if (!updatedPost) {
+    return
+  }
+
+  applyUpdatedPost(updatedPost)
+}
+
+function handleLiveCommentUpdatedEvent(event) {
+  const postId = event.payload?.postId
+  const comment = event.payload?.comment
+
+  if (!postId || !comment) {
+    return
+  }
+
+  applyUpdatedComment(postId, comment)
+}
+
 removeRealtimeListeners.push(
   realtimeClient.on("comment.created", handleLiveCommentEvent),
-  realtimeClient.on("comment.reply.created", handleLiveCommentEvent)
+  realtimeClient.on("comment.reply.created", handleLiveCommentEvent),
+  realtimeClient.on("post.updated", handleLivePostUpdatedEvent),
+  realtimeClient.on("comment.updated", handleLiveCommentUpdatedEvent)
 )
 
 onBeforeUnmount(() => {
@@ -421,24 +712,74 @@ watch(
 
           <article v-for="post in posts" :id="`post-${post.id}`" :key="post.id" class="panel post-card">
             <header class="post-card__header">
-              <div>
+              <div class="post-card__header-main">
                 <p class="eyebrow">Post</p>
-                <h3>{{ post.title }}</h3>
-                <p class="post-card__meta">
-                  <strong>{{ displayName(post.author) }}</strong>
-                  <span>{{ formatDate(post.createdAt) }}</span>
-                  <span class="badge">{{ post.privacy }}</span>
-                  <span class="badge badge--soft">{{ post.author.profileVisibility }}</span>
-                  <span class="badge badge--neutral">{{ commentCountLabel(post.commentsCount || 0) }}</span>
-                </p>
+                <template v-if="postEditForms[post.id]?.open">
+                  <h3>Edit post</h3>
+                  <p class="feed-note">Update the title, caption, or visibility. Images stay as they are for now.</p>
+                </template>
+                <template v-else>
+                  <h3>{{ post.title }}</h3>
+                  <p class="post-card__meta">
+                    <strong>{{ displayName(post.author) }}</strong>
+                    <span>{{ formatDate(post.createdAt) }}</span>
+                    <span class="badge">{{ post.privacy }}</span>
+                    <span class="badge badge--soft">{{ post.author.profileVisibility }}</span>
+                    <span class="badge badge--neutral">{{ commentCountLabel(post.commentsCount || 0) }}</span>
+                  </p>
+                </template>
               </div>
               <div class="post-card__timestamps">
                 <span>Created {{ formatDate(post.createdAt) }}</span>
+                <button
+                  v-if="canEditAuthor(post.author)"
+                  type="button"
+                  class="button button--ghost button--small"
+                  @click="togglePostEdit(post)"
+                >
+                  {{ postEditForms[post.id]?.open ? "Cancel edit" : "Edit" }}
+                </button>
                 <span v-if="post.updatedAt !== post.createdAt">Updated {{ formatDate(post.updatedAt) }}</span>
               </div>
             </header>
 
-            <p class="post-card__body">{{ post.body }}</p>
+            <form v-if="postEditForms[post.id]?.open" class="post-editor" @submit.prevent="submitPostEdit(post)">
+              <input
+                v-model.trim="postEditForms[post.id].title"
+                type="text"
+                maxlength="120"
+                placeholder="Post title"
+              />
+              <textarea
+                v-model.trim="postEditForms[post.id].body"
+                rows="4"
+                maxlength="3000"
+                placeholder="Post caption"
+              ></textarea>
+              <div class="post-editor__row">
+                <label class="post-editor__field">
+                  <span>Visibility</span>
+                  <select v-model="postEditForms[post.id].privacy">
+                    <option value="public">Public</option>
+                    <option value="followers">Followers</option>
+                  </select>
+                </label>
+              </div>
+              <div class="post-editor__actions">
+                <p class="feed-note">Only the owner of the post can save these changes.</p>
+                <div class="editor-actions">
+                  <button type="button" class="button button--ghost button--small" @click="closePostEdit(post)">
+                    Cancel
+                  </button>
+                  <button type="submit" class="button button--small" :disabled="postEditSaving[post.id]">
+                    {{ postEditSaving[post.id] ? "Saving..." : "Save post" }}
+                  </button>
+                </div>
+              </div>
+              <p v-if="postEditErrorByPost[post.id]" class="form-error">{{ postEditErrorByPost[post.id] }}</p>
+            </form>
+
+            <p v-else class="post-card__body">{{ post.body }}</p>
 
             <div v-if="post.media?.length" class="carousel">
               <div class="carousel__frame">
@@ -505,22 +846,69 @@ watch(
                 <div v-else-if="commentsByPost[post.id]?.length" class="comment-stack">
                   <article v-for="comment in commentsByPost[post.id]" :key="comment.id" class="comment-card">
                     <header class="comment-card__header">
-                      <strong>{{ displayName(comment.author) }}</strong>
-                      <span>{{ formatDate(comment.createdAt) }}</span>
-                    </header>
-                    <p class="comment-card__body">{{ comment.body }}</p>
-                    <div class="comment-card__actions">
+                      <div class="comment-card__header-main">
+                        <strong>{{ displayName(comment.author) }}</strong>
+                        <span>{{ commentTimestampLabel(comment) }}</span>
+                      </div>
                       <button
+                        v-if="canEditAuthor(comment.author)"
                         type="button"
                         class="button button--ghost button--small"
-                        @click="toggleReplyForm(post.id, comment.id)"
+                        @click="toggleCommentEdit(comment)"
                       >
-                        {{
-                          replyForms[replyKey(post.id, comment.id)]?.open
-                            ? "Cancel reply"
-                            : "Reply"
-                        }}
+                        {{ commentEditForms[comment.id]?.open ? "Cancel edit" : "Edit" }}
                       </button>
+                    </header>
+
+                    <form
+                      v-if="commentEditForms[comment.id]?.open"
+                      class="comment-composer comment-composer--edit"
+                      @submit.prevent="submitCommentEdit(post.id, comment)"
+                    >
+                      <textarea
+                        v-model.trim="commentEditForms[comment.id].body"
+                        rows="3"
+                        maxlength="1000"
+                        placeholder="Update your comment"
+                      ></textarea>
+                      <div class="comment-composer__actions">
+                        <p class="feed-note">Your place in the thread stays the same after editing.</p>
+                        <div class="editor-actions">
+                          <button
+                            type="button"
+                            class="button button--ghost button--small"
+                            @click="closeCommentEdit(comment)"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            class="button button--small"
+                            :disabled="commentEditSaving[comment.id]"
+                          >
+                            {{ commentEditSaving[comment.id] ? "Saving..." : "Save" }}
+                          </button>
+                        </div>
+                      </div>
+                      <p v-if="commentEditErrors[comment.id]" class="form-error">{{ commentEditErrors[comment.id] }}</p>
+                    </form>
+
+                    <p v-else class="comment-card__body">{{ comment.body }}</p>
+
+                    <div class="comment-card__actions">
+                      <div class="editor-actions">
+                        <button
+                          type="button"
+                          class="button button--ghost button--small"
+                          @click="toggleReplyForm(post.id, comment.id)"
+                        >
+                          {{
+                            replyForms[replyKey(post.id, comment.id)]?.open
+                              ? "Cancel reply"
+                              : "Reply"
+                          }}
+                        </button>
+                      </div>
                       <span class="feed-note">
                         {{ comment.replies?.length ? `${comment.replies.length} replies` : "No replies yet" }}
                       </span>
@@ -559,10 +947,54 @@ watch(
                         class="comment-card comment-card--reply"
                       >
                         <header class="comment-card__header">
-                          <strong>{{ displayName(reply.author) }}</strong>
-                          <span>{{ formatDate(reply.createdAt) }}</span>
+                          <div class="comment-card__header-main">
+                            <strong>{{ displayName(reply.author) }}</strong>
+                            <span>{{ commentTimestampLabel(reply) }}</span>
+                          </div>
+                          <button
+                            v-if="canEditAuthor(reply.author)"
+                            type="button"
+                            class="button button--ghost button--small"
+                            @click="toggleCommentEdit(reply)"
+                          >
+                            {{ commentEditForms[reply.id]?.open ? "Cancel edit" : "Edit" }}
+                          </button>
                         </header>
-                        <p class="comment-card__body">{{ reply.body }}</p>
+
+                        <form
+                          v-if="commentEditForms[reply.id]?.open"
+                          class="comment-composer comment-composer--edit"
+                          @submit.prevent="submitCommentEdit(post.id, reply)"
+                        >
+                          <textarea
+                            v-model.trim="commentEditForms[reply.id].body"
+                            rows="3"
+                            maxlength="1000"
+                            placeholder="Update your reply"
+                          ></textarea>
+                          <div class="comment-composer__actions">
+                            <p class="feed-note">Reply editing is only available to its author.</p>
+                            <div class="editor-actions">
+                              <button
+                                type="button"
+                                class="button button--ghost button--small"
+                                @click="closeCommentEdit(reply)"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="submit"
+                                class="button button--small"
+                                :disabled="commentEditSaving[reply.id]"
+                              >
+                                {{ commentEditSaving[reply.id] ? "Saving..." : "Save" }}
+                              </button>
+                            </div>
+                          </div>
+                          <p v-if="commentEditErrors[reply.id]" class="form-error">{{ commentEditErrors[reply.id] }}</p>
+                        </form>
+
+                        <p v-else class="comment-card__body">{{ reply.body }}</p>
                       </article>
                     </div>
                   </article>

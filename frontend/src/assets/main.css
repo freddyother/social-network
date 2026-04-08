@@ -52,6 +52,7 @@
   --notification-unread-border: rgba(24, 182, 255, 0.32);
   --notification-unread-bg: rgba(24, 182, 255, 0.08);
   --header-chip-bg: var(--card);
+  --shell-stage-width: 1320px;
 }
 
 :root[data-theme="nexo-ice"] {
@@ -286,6 +287,7 @@ select {
 }
 
 .shell__content {
+  width: 100%;
   padding: 1.3rem 2rem 2.2rem;
 }
 
@@ -477,6 +479,8 @@ select {
   justify-content: space-between;
   gap: 1rem;
   align-items: center;
+  width: min(100%, var(--shell-stage-width));
+  margin-inline: auto;
   margin-bottom: 1.1rem;
   padding-bottom: 1rem;
   border-bottom: 1px solid var(--line);
@@ -534,11 +538,13 @@ select {
 }
 
 .shell__main {
-  width: 100%;
-  max-width: 1380px;
+  width: min(100%, var(--shell-stage-width));
+  margin-inline: auto;
 }
 
 .shell__content > .shell__error {
+  width: min(100%, var(--shell-stage-width));
+  margin-inline: auto;
   text-align: left;
 }
 
@@ -668,6 +674,11 @@ select {
   align-items: flex-start;
 }
 
+.post-card__header-main {
+  display: grid;
+  gap: 0.35rem;
+}
+
 .post-card__meta {
   display: flex;
   flex-wrap: wrap;
@@ -686,6 +697,45 @@ select {
   margin: 0;
   color: var(--ink);
   font-size: 1rem;
+}
+
+.post-editor,
+.post-editor__field {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.post-editor__row {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.post-editor__field span {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.post-editor__actions,
+.editor-actions,
+.comment-card__header-main {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.85rem;
+  align-items: center;
+}
+
+.post-editor__actions {
+  align-items: flex-start;
+}
+
+.editor-actions {
+  flex-wrap: wrap;
+}
+
+.comment-card__header-main {
+  justify-content: flex-start;
+  flex-wrap: wrap;
 }
 
 .carousel {
@@ -1294,6 +1344,13 @@ label {
   gap: 0.75rem;
 }
 
+.comment-composer--edit {
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
 .comment-composer--reply {
   margin-left: 1rem;
 }
@@ -1313,7 +1370,7 @@ label {
 }
 
 .comment-card__header {
-  align-items: baseline;
+  align-items: flex-start;
 }
 
 .comment-card__header span,
@@ -1488,6 +1545,8 @@ textarea::placeholder {
   .chat-panel__header,
   .chat-panel__identity,
   .chat-composer__actions,
+  .post-editor__actions,
+  .editor-actions,
   .chat-bubble footer,
   .theme-option,
   .carousel__controls,
