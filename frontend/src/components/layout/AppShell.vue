@@ -27,6 +27,12 @@ const navItems = [
     icon: "profile"
   },
   {
+    label: "My posts",
+    description: "Browse only the posts you've published and reopen your own threads.",
+    to: "/my-posts",
+    icon: "myPosts"
+  },
+  {
     label: "Groups",
     description: "Explore the area reserved for communities and events.",
     to: "/groups",

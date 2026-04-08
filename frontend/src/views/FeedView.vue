@@ -7,6 +7,7 @@ import {
   fetchComments,
   fetchDiscoverUsers,
   fetchFeed,
+  fetchMyPosts,
   followUser,
   isApiError,
   updateComment,
@@ -18,9 +19,24 @@ import { formatDate as formatAppDate } from "../utils/date"
 
 const store = useAppStore()
 const route = useRoute()
+const props = defineProps({
+  scope: {
+    type: String,
+    default: "all"
+  }
+})
 
 const isAuthenticated = computed(() => Boolean(store.state.currentUser))
 const currentUserId = computed(() => store.state.currentUser?.id || "")
+const isMyPostsScope = computed(() => props.scope === "mine")
+const showDiscoverPanel = computed(() => !isMyPostsScope.value)
+const pageTitle = computed(() => (isMyPostsScope.value ? "My posts" : "Latest posts"))
+const guestTitle = computed(() => (isMyPostsScope.value ? "Sign in to unlock your posts" : "Sign in to unlock the feed"))
+const guestDescription = computed(() =>
+  isMyPostsScope.value
+    ? "This page keeps your own published posts in one place, including your comment threads and edit actions."
+    : "The personalized feed, follow graph, dedicated create flow, and threaded comments are only available after authentication."
+)
 const posts = ref([])
 const suggestedUsers = ref([])
 const requestError = ref("")
@@ -42,6 +58,19 @@ const commentEditSaving = reactive({})
 const commentEditErrors = reactive({})
 const removeRealtimeListeners = []
 const subscribedPostIds = new Set()
+const postsSummary = computed(() => {
+  if (isLoading.value) {
+    return isMyPostsScope.value ? "Refreshing your posts..." : "Refreshing the feed..."
+  }
+
+  return isMyPostsScope.value ? `${posts.value.length} of your posts` : `${posts.value.length} visible posts`
+})
+const emptyTitle = computed(() => (isMyPostsScope.value ? "You haven't posted yet" : "Your feed is empty for now"))
+const emptyDescription = computed(() =>
+  isMyPostsScope.value
+    ? "Use the `+` action to publish your first post and build up your personal post library."
+    : "Use the `+` action to create the first post or follow another public account to start filling this page."
+)
 
 function displayName(user) {
   if (!user) {
@@ -342,7 +371,10 @@ async function loadFeedData() {
   requestError.value = ""
 
   try {
-    const [feedPosts, discoverUsers] = await Promise.all([fetchFeed(), fetchDiscoverUsers()])
+    const [feedPosts, discoverUsers] = await Promise.all([
+      isMyPostsScope.value ? fetchMyPosts() : fetchFeed(),
+      showDiscoverPanel.value ? fetchDiscoverUsers() : Promise.resolve([])
+    ])
 
     unsubscribeAllPostRooms()
     posts.value = feedPosts
@@ -371,7 +403,11 @@ async function loadFeedData() {
 
     await focusPostFromRoute()
   } catch (error) {
-    requestError.value = error instanceof Error ? error.message : "Could not load the feed."
+    requestError.value = error instanceof Error
+      ? error.message
+      : isMyPostsScope.value
+        ? "Could not load your posts."
+        : "Could not load the feed."
   } finally {
     isLoading.value = false
   }
@@ -696,18 +732,16 @@ watch(
     <p v-if="requestError" class="form-error">{{ requestError }}</p>
 
     <div v-if="!isAuthenticated" class="panel">
-      <h3>Sign in to unlock the feed</h3>
-      <p>
-        The personalized feed, follow graph, dedicated create flow, and threaded comments are only available after authentication.
-      </p>
+      <h3>{{ guestTitle }}</h3>
+      <p>{{ guestDescription }}</p>
     </div>
 
     <template v-else>
-      <div class="feed-layout">
+      <div class="feed-layout" :class="{ 'feed-layout--single': !showDiscoverPanel }">
         <section class="page">
           <div class="feed-header">
-            <h3>Latest posts</h3>
-            <p>{{ isLoading ? "Refreshing the feed..." : `${posts.length} visible posts` }}</p>
+            <h3>{{ pageTitle }}</h3>
+            <p>{{ postsSummary }}</p>
           </div>
 
           <article v-for="post in posts" :id="`post-${post.id}`" :key="post.id" class="panel post-card">
@@ -1008,12 +1042,12 @@ watch(
           </article>
 
           <div v-if="!posts.length && !isLoading" class="panel">
-            <h3>Your feed is empty for now</h3>
-            <p>Use the `+` action to create the first post or follow another public account to start filling this page.</p>
+            <h3>{{ emptyTitle }}</h3>
+            <p>{{ emptyDescription }}</p>
           </div>
         </section>
 
-        <aside class="feed-side">
+        <aside v-if="showDiscoverPanel" class="feed-side">
           <section class="panel">
             <p class="eyebrow">People</p>
             <h3>Discover accounts</h3>

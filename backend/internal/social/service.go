@@ -360,53 +360,39 @@ func (s Service) Feed(ctx context.Context, viewerID string) ([]Post, error) {
 	}
 	defer rows.Close()
 
-	posts := make([]Post, 0)
-	postIDs := make([]string, 0)
+	return s.loadPostsFromRows(ctx, rows, "feed")
+}
 
-	for rows.Next() {
-		var item Post
-		var nickname sql.NullString
-		if err := rows.Scan(
-			&item.ID,
-			&item.Title,
-			&item.Body,
-			&item.Privacy,
-			&item.CreatedAt,
-			&item.UpdatedAt,
-			&item.Author.ID,
-			&item.Author.FirstName,
-			&item.Author.LastName,
-			&nickname,
-			&item.Author.ProfileVisibility,
-		); err != nil {
-			return nil, fmt.Errorf("scan feed post: %w", err)
-		}
-
-		item.Author.Nickname = nullStringValue(nickname)
-		posts = append(posts, item)
-		postIDs = append(postIDs, item.ID)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate feed posts: %w", err)
-	}
-
-	mediaByPostID, err := s.loadPostMedia(ctx, postIDs)
+func (s Service) MyPosts(ctx context.Context, userID string) ([]Post, error) {
+	rows, err := s.db.QueryContext(
+		ctx,
+		`
+			SELECT
+				p.id,
+				p.title,
+				p.body,
+				p.privacy,
+				p.created_at,
+				p.updated_at,
+				u.id,
+				u.first_name,
+				u.last_name,
+				u.nickname,
+				u.profile_visibility
+			FROM posts p
+			INNER JOIN users u ON u.id = p.author_id
+			WHERE p.author_id = $1
+			ORDER BY p.created_at DESC
+			LIMIT 50
+		`,
+		userID,
+	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query my posts: %w", err)
 	}
+	defer rows.Close()
 
-	commentCountsByPostID, err := s.loadCommentCounts(ctx, postIDs)
-	if err != nil {
-		return nil, err
-	}
-
-	for index := range posts {
-		posts[index].Media = mediaByPostID[posts[index].ID]
-		posts[index].CommentsCount = commentCountsByPostID[posts[index].ID]
-	}
-
-	return posts, nil
+	return s.loadPostsFromRows(ctx, rows, "my posts")
 }
 
 func (s Service) CanViewPost(ctx context.Context, viewerID, postID string) bool {
@@ -1042,6 +1028,56 @@ func (s Service) buildPostMedia(saved []savedMedia) []PostMedia {
 	}
 
 	return media
+}
+
+func (s Service) loadPostsFromRows(ctx context.Context, rows *sql.Rows, operation string) ([]Post, error) {
+	posts := make([]Post, 0)
+	postIDs := make([]string, 0)
+
+	for rows.Next() {
+		var item Post
+		var nickname sql.NullString
+		if err := rows.Scan(
+			&item.ID,
+			&item.Title,
+			&item.Body,
+			&item.Privacy,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+			&item.Author.ID,
+			&item.Author.FirstName,
+			&item.Author.LastName,
+			&nickname,
+			&item.Author.ProfileVisibility,
+		); err != nil {
+			return nil, fmt.Errorf("scan %s post: %w", operation, err)
+		}
+
+		item.Author.Nickname = nullStringValue(nickname)
+		posts = append(posts, item)
+		postIDs = append(postIDs, item.ID)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate %s posts: %w", operation, err)
+	}
+
+	mediaByPostID, err := s.loadPostMedia(ctx, postIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	commentCountsByPostID, err := s.loadCommentCounts(ctx, postIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	for index := range posts {
+		posts[index].Media = mediaByPostID[posts[index].ID]
+		posts[index].CommentsCount = commentCountsByPostID[posts[index].ID]
+	}
+
+	return posts, nil
 }
 
 func (s Service) loadPostEditorState(ctx context.Context, reader sqlReader, postID string) (editablePost, error) {

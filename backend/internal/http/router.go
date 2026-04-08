@@ -51,6 +51,7 @@ func NewRouter(cfg config.Config, db *sql.DB) stdlibhttp.Handler {
 	mux.HandleFunc("GET /api/v1/auth/me", authHandler.HandleCurrentUser)
 	mux.HandleFunc("GET /api/v1/ws", wsHandler.HandleConnect)
 	mux.HandleFunc("GET /api/v1/posts", socialHandler.HandleFeed)
+	mux.HandleFunc("GET /api/v1/posts/mine", socialHandler.HandleMyPosts)
 	mux.HandleFunc("POST /api/v1/posts", socialHandler.HandleCreatePost)
 	mux.HandleFunc("PATCH /api/v1/posts/{postID}", socialHandler.HandleUpdatePost)
 	mux.HandleFunc("GET /api/v1/chat/conversations", socialHandler.HandleConversations)

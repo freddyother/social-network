@@ -610,6 +610,10 @@ select {
   align-items: start;
 }
 
+.feed-layout--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .feed-side {
   display: grid;
   gap: 1rem;

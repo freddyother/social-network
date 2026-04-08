@@ -17,6 +17,7 @@ type socialService interface {
 	CreatePost(ctx context.Context, author auth.User, input social.CreatePostInput) (social.Post, error)
 	UpdatePost(ctx context.Context, author auth.User, postID string, input social.UpdatePostInput) (social.Post, error)
 	Feed(ctx context.Context, viewerID string) ([]social.Post, error)
+	MyPosts(ctx context.Context, userID string) ([]social.Post, error)
 	Conversations(ctx context.Context, userID string) ([]social.ConversationSummary, error)
 	Conversation(ctx context.Context, viewerID, partnerID string) (social.ConversationThread, error)
 	SendPrivateMessage(ctx context.Context, sender auth.User, partnerID string, input social.SendPrivateMessageInput) (social.PrivateMessage, error)
@@ -56,6 +57,23 @@ func (h SocialHandler) HandleFeed(w stdlibhttp.ResponseWriter, r *stdlibhttp.Req
 	}
 
 	posts, err := h.service.Feed(r.Context(), currentUser.ID)
+	if err != nil {
+		h.handleSocialError(w, err)
+		return
+	}
+
+	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
+		"posts": posts,
+	})
+}
+
+func (h SocialHandler) HandleMyPosts(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	currentUser, ok := h.requireCurrentUser(w, r)
+	if !ok {
+		return
+	}
+
+	posts, err := h.service.MyPosts(r.Context(), currentUser.ID)
 	if err != nil {
 		h.handleSocialError(w, err)
 		return

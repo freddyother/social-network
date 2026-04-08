@@ -129,6 +129,11 @@ export async function fetchFeed() {
   return payload?.posts || []
 }
 
+export async function fetchMyPosts() {
+  const payload = await request("/posts/mine", { method: "GET" })
+  return payload?.posts || []
+}
+
 export async function fetchChatConversations() {
   const payload = await request("/chat/conversations", { method: "GET" })
   return (payload?.conversations || []).map(normalizeConversation)

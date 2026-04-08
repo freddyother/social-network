@@ -3,6 +3,7 @@ import {
   Bell,
   CircleUserRound,
   Compass,
+  LayoutGrid,
   House,
   Plus,
   Send
@@ -23,6 +24,7 @@ const icons = {
   feed: House,
   create: Plus,
   profile: CircleUserRound,
+  myPosts: LayoutGrid,
   groups: Compass,
   notifications: Bell,
   chat: Send
