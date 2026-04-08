@@ -108,6 +108,12 @@ type FollowActionResult struct {
 	Status string `json:"status"`
 }
 
+type UpdateProfileInput struct {
+	FirstName string
+	LastName  string
+	AboutMe   string
+}
+
 type Service struct {
 	db            *sql.DB
 	uploadsDir    string
@@ -809,6 +815,50 @@ func (s Service) UpdateProfileVisibility(ctx context.Context, userID, visibility
 	return user, nil
 }
 
+func (s Service) UpdateProfile(ctx context.Context, userID string, input UpdateProfileInput) (auth.User, error) {
+	normalizedInput, err := normalizeUpdateProfileInput(input)
+	if err != nil {
+		return auth.User{}, err
+	}
+
+	row := s.db.QueryRowContext(
+		ctx,
+		`
+			UPDATE users
+			SET first_name = $1, last_name = $2, about_me = NULLIF($3, ''), updated_at = NOW()
+			WHERE id = $4
+			RETURNING
+				id,
+				email,
+				first_name,
+				last_name,
+				date_of_birth,
+				avatar_url,
+				nickname,
+				about_me,
+				profile_visibility,
+				theme_preference,
+				created_at,
+				updated_at
+		`,
+		normalizedInput.FirstName,
+		normalizedInput.LastName,
+		normalizedInput.AboutMe,
+		userID,
+	)
+
+	user, err := scanAuthUser(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return auth.User{}, ErrNotFound
+		}
+
+		return auth.User{}, fmt.Errorf("update profile: %w", err)
+	}
+
+	return user, nil
+}
+
 func (s Service) UpdateThemePreference(ctx context.Context, userID, themePreference string) (auth.User, error) {
 	normalizedThemePreference, err := normalizeThemePreference(themePreference)
 	if err != nil {
@@ -1205,6 +1255,36 @@ func normalizeThemePreference(themePreference string) (string, error) {
 			},
 		}
 	}
+}
+
+func normalizeUpdateProfileInput(input UpdateProfileInput) (UpdateProfileInput, error) {
+	normalized := UpdateProfileInput{
+		FirstName: strings.TrimSpace(input.FirstName),
+		LastName:  strings.TrimSpace(input.LastName),
+		AboutMe:   strings.TrimSpace(input.AboutMe),
+	}
+
+	fieldErrors := make(map[string]string)
+	if normalized.FirstName == "" {
+		fieldErrors["firstName"] = "First name is required."
+	}
+
+	if normalized.LastName == "" {
+		fieldErrors["lastName"] = "Last name is required."
+	}
+
+	if len(normalized.AboutMe) > 500 {
+		fieldErrors["aboutMe"] = "About me must be 500 characters or fewer."
+	}
+
+	if len(fieldErrors) > 0 {
+		return UpdateProfileInput{}, &ValidationError{
+			Message: "Please correct the profile details.",
+			Fields:  fieldErrors,
+		}
+	}
+
+	return normalized, nil
 }
 
 func wrapImageUploadError(err error, field string) error {

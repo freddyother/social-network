@@ -250,6 +250,15 @@ export async function updateProfileVisibility(visibility) {
   return normalizeUser(payload?.user || null)
 }
 
+export async function updateProfile(profile) {
+  const payload = await request("/users/me/profile", {
+    method: "PATCH",
+    body: JSON.stringify(profile)
+  })
+
+  return normalizeUser(payload?.user || null)
+}
+
 export async function updateThemePreference(themePreference) {
   const payload = await request("/users/me/theme-preference", {
     method: "PATCH",

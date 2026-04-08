@@ -29,6 +29,7 @@ type socialService interface {
 	FollowUser(ctx context.Context, followerID, followeeID string) (social.FollowActionResult, error)
 	IncomingFollowRequests(ctx context.Context, userID string) ([]social.FollowRequest, error)
 	RespondToFollowRequest(ctx context.Context, userID, requestID string, accept bool) error
+	UpdateProfile(ctx context.Context, userID string, input social.UpdateProfileInput) (auth.User, error)
 	UpdateProfileVisibility(ctx context.Context, userID, visibility string) (auth.User, error)
 	UpdateThemePreference(ctx context.Context, userID, themePreference string) (auth.User, error)
 	UpdateAvatar(ctx context.Context, userID string, input social.AvatarUploadInput) (auth.User, error)
@@ -449,6 +450,37 @@ func (h SocialHandler) HandleUpdateThemePreference(w stdlibhttp.ResponseWriter, 
 	}
 
 	user, err := h.service.UpdateThemePreference(r.Context(), currentUser.ID, payload.ThemePreference)
+	if err != nil {
+		h.handleSocialError(w, err)
+		return
+	}
+
+	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
+		"user": user,
+	})
+}
+
+func (h SocialHandler) HandleUpdateProfile(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	currentUser, ok := h.requireCurrentUser(w, r)
+	if !ok {
+		return
+	}
+
+	var payload struct {
+		FirstName string `json:"firstName"`
+		LastName  string `json:"lastName"`
+		AboutMe   string `json:"aboutMe"`
+	}
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdlibhttp.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	user, err := h.service.UpdateProfile(r.Context(), currentUser.ID, social.UpdateProfileInput{
+		FirstName: payload.FirstName,
+		LastName:  payload.LastName,
+		AboutMe:   payload.AboutMe,
+	})
 	if err != nil {
 		h.handleSocialError(w, err)
 		return

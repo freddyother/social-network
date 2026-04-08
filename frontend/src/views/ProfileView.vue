@@ -7,6 +7,7 @@ import {
   declineFollowRequest,
   fetchFollowRequests,
   isApiError,
+  updateProfile,
   uploadProfileAvatar,
   updateProfileVisibility,
   updateThemePreference
@@ -39,14 +40,22 @@ const privacyForm = reactive({
   visibility: "public"
 })
 
+const profileForm = reactive({
+  firstName: "",
+  lastName: "",
+  aboutMe: ""
+})
+
 const themeOptions = THEME_OPTIONS
 const requests = ref([])
 const avatarInput = ref(null)
 const profileError = ref("")
+const profileDetailsError = ref("")
 const requestError = ref("")
 const themeError = ref("")
 const avatarError = ref("")
 const isUploadingAvatar = ref(false)
+const isSavingProfile = ref(false)
 const isSavingPrivacy = ref(false)
 const isSavingTheme = ref("")
 const loadingRequests = ref(false)
@@ -57,6 +66,17 @@ const activeThemePreference = computed(() => currentProfile.value?.themePreferen
 const hasVisibilityChanges = computed(
   () => Boolean(currentProfile.value) && privacyForm.visibility !== (currentProfile.value?.profileVisibility || "public")
 )
+const hasProfileChanges = computed(() => {
+  if (!currentProfile.value) {
+    return false
+  }
+
+  return (
+    profileForm.firstName !== (currentProfile.value.firstName || "") ||
+    profileForm.lastName !== (currentProfile.value.lastName || "") ||
+    profileForm.aboutMe !== (currentProfile.value.aboutMe || "")
+  )
+})
 const profileInitials = computed(() => {
   const user = currentProfile.value
   if (!user) {
@@ -76,6 +96,12 @@ function loadPrivacyValue() {
   privacyForm.visibility = currentProfile.value?.profileVisibility || "public"
 }
 
+function loadProfileForm() {
+  profileForm.firstName = currentProfile.value?.firstName || ""
+  profileForm.lastName = currentProfile.value?.lastName || ""
+  profileForm.aboutMe = currentProfile.value?.aboutMe || ""
+}
+
 async function loadFollowRequests() {
   if (!currentProfile.value) {
     requests.value = []
@@ -91,6 +117,36 @@ async function loadFollowRequests() {
     requestError.value = error instanceof Error ? error.message : "Could not load follow requests."
   } finally {
     loadingRequests.value = false
+  }
+}
+
+async function saveProfile() {
+  if (!currentProfile.value || !hasProfileChanges.value) {
+    return
+  }
+
+  isSavingProfile.value = true
+  profileDetailsError.value = ""
+
+  try {
+    const updatedUser = await updateProfile({
+      firstName: profileForm.firstName,
+      lastName: profileForm.lastName,
+      aboutMe: profileForm.aboutMe
+    })
+    store.setCurrentUser(updatedUser)
+  } catch (error) {
+    if (isApiError(error)) {
+      profileDetailsError.value =
+        error.payload?.fields?.firstName ||
+        error.payload?.fields?.lastName ||
+        error.payload?.fields?.aboutMe ||
+        error.message
+    } else {
+      profileDetailsError.value = "Could not update your profile details."
+    }
+  } finally {
+    isSavingProfile.value = false
   }
 }
 
@@ -233,9 +289,23 @@ async function focusRequestedSection() {
 }
 
 watch(
+  () => [
+    currentProfile.value?.firstName,
+    currentProfile.value?.lastName,
+    currentProfile.value?.aboutMe,
+    currentProfile.value?.profileVisibility
+  ],
+  () => {
+    loadPrivacyValue()
+    loadProfileForm()
+  },
+  { immediate: true }
+)
+
+watch(
   () => currentProfile.value?.id,
   async () => {
-    loadPrivacyValue()
+    profileDetailsError.value = ""
     await loadFollowRequests()
     await focusRequestedSection()
   },
@@ -318,10 +388,41 @@ onBeforeUnmount(() => {
     <div class="grid grid--two">
       <article class="panel">
         <template v-if="currentProfile">
-          <h3>Account details</h3>
-          <p>Date of birth: {{ formatDate(currentProfile.dateOfBirth) }}</p>
-          <p>Nickname: {{ currentProfile.nickname || "Not set yet" }}</p>
-          <p>Email: {{ currentProfile.email }}</p>
+          <h3>Edit profile</h3>
+          <p>Update your public identity here. Photo changes stay in the profile header above.</p>
+          <div class="stack-form">
+            <div class="form-grid">
+              <label>
+                <span>First name</span>
+                <input v-model.trim="profileForm.firstName" type="text" placeholder="First name" />
+              </label>
+              <label>
+                <span>Last name</span>
+                <input v-model.trim="profileForm.lastName" type="text" placeholder="Last name" />
+              </label>
+              <label class="form-grid__full">
+                <span>About me</span>
+                <textarea
+                  v-model="profileForm.aboutMe"
+                  rows="5"
+                  maxlength="500"
+                  placeholder="Tell your story in a few lines to make this profile feel alive."
+                ></textarea>
+              </label>
+            </div>
+            <div class="profile-form__actions">
+              <p class="feed-note">Email, nickname, and date of birth stay locked for now.</p>
+              <button
+                type="button"
+                class="button"
+                :disabled="isSavingProfile || !hasProfileChanges"
+                @click="saveProfile"
+              >
+                {{ isSavingProfile ? "Saving..." : "Save profile" }}
+              </button>
+            </div>
+            <p v-if="profileDetailsError" class="form-error">{{ profileDetailsError }}</p>
+          </div>
         </template>
         <template v-else>
           <h3>Main sections</h3>
@@ -330,8 +431,10 @@ onBeforeUnmount(() => {
       </article>
       <article class="panel">
         <template v-if="currentProfile">
-          <h3>About me</h3>
-          <p>{{ currentProfile.aboutMe || "Tell your story in a few lines to make this profile feel alive." }}</p>
+          <h3>Locked fields</h3>
+          <p>Date of birth: {{ formatDate(currentProfile.dateOfBirth) }}</p>
+          <p>Nickname: {{ currentProfile.nickname || "Not set yet" }}</p>
+          <p>Email: {{ currentProfile.email }}</p>
         </template>
         <template v-else>
           <h3>Permissions</h3>
