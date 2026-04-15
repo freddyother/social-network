@@ -71,8 +71,9 @@ type RegisterInput struct {
 }
 
 type LoginInput struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Identifier string `json:"identifier"`
+	Email      string `json:"email,omitempty"`
+	Password   string `json:"password"`
 }
 
 type Service struct {
@@ -185,7 +186,7 @@ func (s Service) Login(ctx context.Context, input LoginInput) (AuthResult, error
 		return AuthResult{}, err
 	}
 
-	record, err := s.findUserByEmail(ctx, normalizedInput.Email)
+	record, err := s.findUserByLoginIdentifier(ctx, normalizedInput.Identifier)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return AuthResult{}, ErrInvalidCredentials
@@ -280,7 +281,7 @@ func (s Service) CurrentUser(ctx context.Context, sessionID string) (*User, erro
 	return &user, nil
 }
 
-func (s Service) findUserByEmail(ctx context.Context, email string) (userRecord, error) {
+func (s Service) findUserByLoginIdentifier(ctx context.Context, identifier string) (userRecord, error) {
 	row := s.db.QueryRowContext(
 		ctx,
 		`
@@ -299,9 +300,9 @@ func (s Service) findUserByEmail(ctx context.Context, email string) (userRecord,
 				created_at,
 				updated_at
 			FROM users
-			WHERE email = $1
+			WHERE email = $1 OR LOWER(BTRIM(nickname)) = $1
 		`,
-		email,
+		identifier,
 	)
 
 	record, err := scanUserRecord(row)
@@ -310,7 +311,7 @@ func (s Service) findUserByEmail(ctx context.Context, email string) (userRecord,
 			return userRecord{}, sql.ErrNoRows
 		}
 
-		return userRecord{}, fmt.Errorf("find user by email: %w", err)
+		return userRecord{}, fmt.Errorf("find user by login identifier: %w", err)
 	}
 
 	return record, nil
@@ -418,14 +419,19 @@ func parseDateOfBirth(value string) (time.Time, error) {
 }
 
 func normalizeLoginInput(input LoginInput) (LoginInput, error) {
+	rawIdentifier := input.Identifier
+	if strings.TrimSpace(rawIdentifier) == "" {
+		rawIdentifier = input.Email
+	}
+
 	normalized := LoginInput{
-		Email:    strings.ToLower(strings.TrimSpace(input.Email)),
-		Password: input.Password,
+		Identifier: strings.ToLower(strings.TrimSpace(rawIdentifier)),
+		Password:   input.Password,
 	}
 
 	fieldErrors := make(map[string]string)
-	if normalized.Email == "" {
-		fieldErrors["email"] = "Email is required."
+	if normalized.Identifier == "" {
+		fieldErrors["identifier"] = "Nickname or email is required."
 	}
 
 	if normalized.Password == "" {
@@ -434,7 +440,7 @@ func normalizeLoginInput(input LoginInput) (LoginInput, error) {
 
 	if len(fieldErrors) > 0 {
 		return LoginInput{}, &ValidationError{
-			Message: "Email and password are required.",
+			Message: "Nickname or email and password are required.",
 			Fields:  fieldErrors,
 		}
 	}

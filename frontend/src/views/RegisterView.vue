@@ -136,7 +136,7 @@ async function handleSubmit() {
             inputmode="numeric"
             placeholder="dd/mm/yyyy"
             autocomplete="bday"
-            pattern="(?:\\d{4}-\\d{2}-\\d{2}|\\d{1,2}/\\d{1,2}/\\d{4})"
+            pattern="(?:[0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{1,2}/[0-9]{1,2}/[0-9]{4})"
             title="Use dd/mm/yyyy or yyyy-mm-dd"
             :aria-invalid="Boolean(fieldErrors.dateOfBirth)"
             required

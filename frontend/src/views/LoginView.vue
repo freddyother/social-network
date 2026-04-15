@@ -9,12 +9,12 @@ const router = useRouter()
 const store = useAppStore()
 
 const form = reactive({
-  email: "",
+  identifier: "",
   password: ""
 })
 
 const fieldErrors = reactive({
-  email: "",
+  identifier: "",
   password: ""
 })
 
@@ -23,7 +23,7 @@ const isSubmitting = ref(false)
 
 function clearErrors() {
   formError.value = ""
-  fieldErrors.email = ""
+  fieldErrors.identifier = ""
   fieldErrors.password = ""
 }
 
@@ -33,7 +33,7 @@ async function handleSubmit() {
 
   try {
     const user = await loginUser({
-      email: form.email,
+      identifier: form.identifier,
       password: form.password
     })
 
@@ -43,7 +43,7 @@ async function handleSubmit() {
     if (isApiError(error)) {
       formError.value = error.message
       const apiFieldErrors = error.payload?.fields || {}
-      fieldErrors.email = apiFieldErrors.email || ""
+      fieldErrors.identifier = apiFieldErrors.identifier || apiFieldErrors.email || ""
       fieldErrors.password = apiFieldErrors.password || ""
     } else {
       formError.value = "Could not sign in right now."
@@ -61,16 +61,16 @@ async function handleSubmit() {
       <h2>Login</h2>
       <form class="stack-form" @submit.prevent="handleSubmit">
         <label>
-          <span>Email</span>
+          <span>Nickname or Email</span>
           <input
-            v-model.trim="form.email"
-            type="email"
-            placeholder="you@example.com"
-            autocomplete="email"
-            :aria-invalid="Boolean(fieldErrors.email)"
+            v-model.trim="form.identifier"
+            type="text"
+            placeholder="win"
+            autocomplete="username"
+            :aria-invalid="Boolean(fieldErrors.identifier)"
             required
           />
-          <p v-if="fieldErrors.email" class="form-error">{{ fieldErrors.email }}</p>
+          <p v-if="fieldErrors.identifier" class="form-error">{{ fieldErrors.identifier }}</p>
         </label>
         <label>
           <span>Password</span>

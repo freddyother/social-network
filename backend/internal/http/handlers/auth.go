@@ -108,7 +108,7 @@ func (h AuthHandler) handleServiceError(w stdlibhttp.ResponseWriter, err error) 
 			"nickname": "That nickname is already in use.",
 		})
 	case errors.Is(err, auth.ErrInvalidCredentials):
-		writeError(w, stdlibhttp.StatusUnauthorized, "Invalid email or password.", nil)
+		writeError(w, stdlibhttp.StatusUnauthorized, "Invalid nickname, email, or password.", nil)
 	case errors.Is(err, auth.ErrUnauthorized):
 		writeError(w, stdlibhttp.StatusUnauthorized, "Authentication required.", nil)
 	default:

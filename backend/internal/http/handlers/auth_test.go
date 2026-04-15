@@ -113,6 +113,66 @@ func TestHandleRegisterReturnsConflictForNicknameAlreadyInUse(t *testing.T) {
 	}
 }
 
+func TestHandleLoginSetsSessionCookie(t *testing.T) {
+	t.Parallel()
+
+	handler := NewAuthHandler(stubAuthService{
+		loginFunc: func(ctx context.Context, input auth.LoginInput) (auth.AuthResult, error) {
+			if input.Identifier != "adal" {
+				t.Fatalf("expected identifier adal, got %q", input.Identifier)
+			}
+
+			if input.Password != "password123" {
+				t.Fatalf("expected password123, got %q", input.Password)
+			}
+
+			return auth.AuthResult{
+				User: auth.User{
+					ID:                "user-1",
+					Email:             "ada@example.com",
+					Nickname:          "adal",
+					ProfileVisibility: "public",
+					CreatedAt:         time.Now().UTC(),
+					UpdatedAt:         time.Now().UTC(),
+				},
+				Session: auth.Session{
+					ID:        "session-1",
+					ExpiresAt: time.Now().UTC().Add(24 * time.Hour),
+				},
+			}, nil
+		},
+	}, config.SessionConfig{
+		CookieName: "social_network_session",
+		TTL:        24 * time.Hour,
+	})
+
+	body, err := json.Marshal(map[string]string{
+		"identifier": "adal",
+		"password":   "password123",
+	})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handler.HandleLogin(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	cookies := rec.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("expected session cookie to be set")
+	}
+
+	if cookies[0].Name != "social_network_session" || cookies[0].Value != "session-1" {
+		t.Fatalf("unexpected cookie: %#v", cookies[0])
+	}
+}
+
 func TestHandleCurrentUserRequiresAuthentication(t *testing.T) {
 	t.Parallel()
 

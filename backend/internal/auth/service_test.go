@@ -137,3 +137,35 @@ func TestUniqueViolationConstraintReturnsEmptyForNonUniqueErrors(t *testing.T) {
 		t.Fatalf("expected empty constraint name, got %q", got)
 	}
 }
+
+func TestNormalizeLoginInputAcceptsIdentifier(t *testing.T) {
+	t.Parallel()
+
+	normalized, err := normalizeLoginInput(LoginInput{
+		Identifier: " Win ",
+		Password:   "password123",
+	})
+	if err != nil {
+		t.Fatalf("normalizeLoginInput returned error: %v", err)
+	}
+
+	if normalized.Identifier != "win" {
+		t.Fatalf("expected normalized identifier %q, got %q", "win", normalized.Identifier)
+	}
+}
+
+func TestNormalizeLoginInputFallsBackToEmailField(t *testing.T) {
+	t.Parallel()
+
+	normalized, err := normalizeLoginInput(LoginInput{
+		Email:    " Ada@example.com ",
+		Password: "password123",
+	})
+	if err != nil {
+		t.Fatalf("normalizeLoginInput returned error: %v", err)
+	}
+
+	if normalized.Identifier != "ada@example.com" {
+		t.Fatalf("expected normalized identifier %q, got %q", "ada@example.com", normalized.Identifier)
+	}
+}
