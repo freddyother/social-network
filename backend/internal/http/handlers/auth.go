@@ -46,7 +46,6 @@ func (h AuthHandler) HandleRegister(w stdlibhttp.ResponseWriter, r *stdlibhttp.R
 		return
 	}
 
-	h.setSessionCookie(w, result.Session)
 	response.JSON(w, stdlibhttp.StatusCreated, map[string]any{
 		"user": result.User,
 	})

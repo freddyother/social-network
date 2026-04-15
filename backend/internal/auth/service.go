@@ -166,18 +166,12 @@ func (s Service) Register(ctx context.Context, input RegisterInput) (AuthResult,
 		return AuthResult{}, fmt.Errorf("insert user: %w", err)
 	}
 
-	session, err := s.createSession(ctx, tx, record.ID)
-	if err != nil {
-		return AuthResult{}, err
-	}
-
 	if err = tx.Commit(); err != nil {
 		return AuthResult{}, fmt.Errorf("commit register transaction: %w", err)
 	}
 
 	return AuthResult{
-		User:    record.PublicUser(),
-		Session: session,
+		User: record.PublicUser(),
 	}, nil
 }
 
@@ -372,13 +366,15 @@ func normalizeRegisterInput(input RegisterInput) (RegisterInput, time.Time, erro
 		fieldErrors["password"] = "Password must be at least 8 characters."
 	}
 
-	birthDate, err := time.Parse("2006-01-02", normalized.DateOfBirth)
+	birthDate, err := parseDateOfBirth(normalized.DateOfBirth)
 	if normalized.DateOfBirth == "" {
 		fieldErrors["dateOfBirth"] = "Date of birth is required."
 	} else if err != nil {
-		fieldErrors["dateOfBirth"] = "Date of birth must use YYYY-MM-DD."
+		fieldErrors["dateOfBirth"] = "Date of birth must use YYYY-MM-DD or DD/MM/YYYY."
 	} else if !birthDate.Before(time.Now().UTC()) {
 		fieldErrors["dateOfBirth"] = "Date of birth must be in the past."
+	} else {
+		normalized.DateOfBirth = birthDate.Format("2006-01-02")
 	}
 
 	if len(normalized.Nickname) > 80 {
@@ -397,6 +393,22 @@ func normalizeRegisterInput(input RegisterInput) (RegisterInput, time.Time, erro
 	}
 
 	return normalized, birthDate.UTC(), nil
+}
+
+func parseDateOfBirth(value string) (time.Time, error) {
+	normalized := strings.TrimSpace(value)
+	if normalized == "" {
+		return time.Time{}, fmt.Errorf("date of birth is empty")
+	}
+
+	for _, layout := range []string{"2006-01-02", "2/1/2006"} {
+		birthDate, err := time.Parse(layout, normalized)
+		if err == nil {
+			return birthDate.UTC(), nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("date of birth must use YYYY-MM-DD or DD/MM/YYYY")
 }
 
 func normalizeLoginInput(input LoginInput) (LoginInput, error) {

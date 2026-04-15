@@ -13,7 +13,7 @@ import (
 	"social-network/backend/internal/config"
 )
 
-func TestHandleRegisterSetsSessionCookie(t *testing.T) {
+func TestHandleRegisterDoesNotSetSessionCookie(t *testing.T) {
 	t.Parallel()
 
 	handler := NewAuthHandler(stubAuthService{
@@ -28,10 +28,6 @@ func TestHandleRegisterSetsSessionCookie(t *testing.T) {
 					ProfileVisibility: "public",
 					CreatedAt:         time.Now().UTC(),
 					UpdatedAt:         time.Now().UTC(),
-				},
-				Session: auth.Session{
-					ID:        "session-1",
-					ExpiresAt: time.Now().UTC().Add(24 * time.Hour),
 				},
 			}, nil
 		},
@@ -61,12 +57,8 @@ func TestHandleRegisterSetsSessionCookie(t *testing.T) {
 	}
 
 	cookies := rec.Result().Cookies()
-	if len(cookies) == 0 {
-		t.Fatalf("expected session cookie to be set")
-	}
-
-	if cookies[0].Name != "social_network_session" || cookies[0].Value != "session-1" {
-		t.Fatalf("unexpected cookie: %#v", cookies[0])
+	if len(cookies) != 0 {
+		t.Fatalf("expected no cookie to be set on register, got %#v", cookies)
 	}
 }
 

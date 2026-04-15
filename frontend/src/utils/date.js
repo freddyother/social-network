@@ -71,7 +71,7 @@ export function toISODateInput(value) {
       : ""
   }
 
-  const displayMatch = normalized.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
+  const displayMatch = normalized.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
   if (!displayMatch) {
     return ""
   }
@@ -81,5 +81,5 @@ export function toISODateInput(value) {
     return ""
   }
 
-  return `${year}-${month}-${day}`
+  return `${year}-${pad(month)}-${pad(day)}`
 }
