@@ -17,3 +17,4 @@ backend/.env
 
 # system
 .DS_Store
+.codex

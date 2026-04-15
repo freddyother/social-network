@@ -65,7 +65,6 @@ async function handleSubmit() {
           <input
             v-model.trim="form.identifier"
             type="text"
-            placeholder="win"
             autocomplete="username"
             :aria-invalid="Boolean(fieldErrors.identifier)"
             required
