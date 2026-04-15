@@ -19,7 +19,19 @@ func NewRouter(cfg config.Config, db *sql.DB) stdlibhttp.Handler {
 
 	healthHandler := handlers.NewHealthHandler(db)
 	metaHandler := handlers.NewMetaHandler(cfg)
-	authService := auth.NewService(db, cfg.Session.TTL)
+	resetMailer := auth.NewSMTPPasswordResetMailer(auth.SMTPMailerConfig{
+		Host:      cfg.Mail.SMTPHost,
+		Port:      cfg.Mail.SMTPPort,
+		Username:  cfg.Mail.Username,
+		Password:  cfg.Mail.Password,
+		FromEmail: cfg.Mail.FromEmail,
+		FromName:  cfg.Mail.FromName,
+	})
+	authService := auth.NewService(db, cfg.Session.TTL, auth.PasswordResetConfig{
+		TokenTTL:             cfg.PasswordReset.TokenTTL,
+		ResetURL:             cfg.PasswordReset.URL,
+		RevealLinkInResponse: cfg.PasswordReset.RevealLinkInResponse,
+	}, resetMailer)
 	realtimeHub := realtime.NewHub()
 	socialService := social.NewService(db, cfg.UploadsDir, cfg.PublicBaseURL, realtimeHub)
 	realtimeHub.SetPostSubscriptionAuthorizer(socialService.CanViewPost)
@@ -48,6 +60,8 @@ func NewRouter(cfg config.Config, db *sql.DB) stdlibhttp.Handler {
 	mux.HandleFunc("POST /api/v1/auth/register", authHandler.HandleRegister)
 	mux.HandleFunc("POST /api/v1/auth/login", authHandler.HandleLogin)
 	mux.HandleFunc("GET /api/v1/auth/nickname-availability", authHandler.HandleNicknameAvailability)
+	mux.HandleFunc("POST /api/v1/auth/forgot-password", authHandler.HandleForgotPassword)
+	mux.HandleFunc("POST /api/v1/auth/reset-password", authHandler.HandleResetPassword)
 	mux.HandleFunc("POST /api/v1/auth/logout", authHandler.HandleLogout)
 	mux.HandleFunc("GET /api/v1/auth/me", authHandler.HandleCurrentUser)
 	mux.HandleFunc("GET /api/v1/ws", wsHandler.HandleConnect)

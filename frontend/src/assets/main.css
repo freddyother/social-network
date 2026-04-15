@@ -1456,6 +1456,19 @@ textarea::placeholder {
   color: var(--success);
 }
 
+.auth-inline-link {
+  color: var(--accent);
+  transition: color 180ms ease;
+}
+
+.auth-inline-link:hover {
+  color: var(--warm);
+}
+
+.auth-inline-link--end {
+  justify-self: end;
+}
+
 .profile-hero__body {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);

@@ -152,6 +152,113 @@ func TestHandleNicknameAvailabilityReturnsAvailability(t *testing.T) {
 	}
 }
 
+func TestHandleForgotPasswordReturnsResetLink(t *testing.T) {
+	t.Parallel()
+
+	handler := NewAuthHandler(stubAuthService{
+		passwordResetRequestFunc: func(ctx context.Context, input auth.PasswordResetRequestInput) (auth.PasswordResetRequestResult, error) {
+			if input.Email != "ada@example.com" {
+				t.Fatalf("expected email ada@example.com, got %q", input.Email)
+			}
+
+			return auth.PasswordResetRequestResult{
+				ResetLink: "http://localhost:5173/reset-password?token=reset-token",
+			}, nil
+		},
+	}, config.SessionConfig{})
+
+	body, err := json.Marshal(map[string]string{
+		"email": "ada@example.com",
+	})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/forgot-password", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handler.HandleForgotPassword(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+
+	if payload["message"] != "If the account exists, we sent a password reset link." {
+		t.Fatalf("unexpected message: %#v", payload["message"])
+	}
+
+	if payload["resetLink"] != "http://localhost:5173/reset-password?token=reset-token" {
+		t.Fatalf("unexpected reset link: %#v", payload["resetLink"])
+	}
+}
+
+func TestHandleResetPasswordReturnsSuccess(t *testing.T) {
+	t.Parallel()
+
+	handler := NewAuthHandler(stubAuthService{
+		resetPasswordFunc: func(ctx context.Context, input auth.ResetPasswordInput) error {
+			if input.Token != "reset-token" {
+				t.Fatalf("expected token reset-token, got %q", input.Token)
+			}
+
+			if input.NewPassword != "password123" {
+				t.Fatalf("expected password123, got %q", input.NewPassword)
+			}
+
+			return nil
+		},
+	}, config.SessionConfig{})
+
+	body, err := json.Marshal(map[string]string{
+		"token":       "reset-token",
+		"newPassword": "password123",
+	})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/reset-password", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handler.HandleResetPassword(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestHandleResetPasswordReturnsValidationErrorForInvalidToken(t *testing.T) {
+	t.Parallel()
+
+	handler := NewAuthHandler(stubAuthService{
+		resetPasswordFunc: func(ctx context.Context, input auth.ResetPasswordInput) error {
+			return auth.ErrInvalidResetToken
+		},
+	}, config.SessionConfig{})
+
+	body, err := json.Marshal(map[string]string{
+		"token":       "bad-token",
+		"newPassword": "password123",
+	})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/reset-password", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handler.HandleResetPassword(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected status %d, got %d", http.StatusUnprocessableEntity, rec.Code)
+	}
+}
+
 func TestHandleLoginSetsSessionCookie(t *testing.T) {
 	t.Parallel()
 
@@ -266,6 +373,8 @@ type stubAuthService struct {
 	registerFunc             func(ctx context.Context, input auth.RegisterInput) (auth.AuthResult, error)
 	loginFunc                func(ctx context.Context, input auth.LoginInput) (auth.AuthResult, error)
 	nicknameAvailabilityFunc func(ctx context.Context, nickname string) (auth.NicknameAvailability, error)
+	passwordResetRequestFunc func(ctx context.Context, input auth.PasswordResetRequestInput) (auth.PasswordResetRequestResult, error)
+	resetPasswordFunc        func(ctx context.Context, input auth.ResetPasswordInput) error
 	logoutFunc               func(ctx context.Context, sessionID string) error
 	currentUserFunc          func(ctx context.Context, sessionID string) (*auth.User, error)
 }
@@ -292,6 +401,22 @@ func (s stubAuthService) CheckNicknameAvailability(ctx context.Context, nickname
 	}
 
 	return s.nicknameAvailabilityFunc(ctx, nickname)
+}
+
+func (s stubAuthService) RequestPasswordReset(ctx context.Context, input auth.PasswordResetRequestInput) (auth.PasswordResetRequestResult, error) {
+	if s.passwordResetRequestFunc == nil {
+		return auth.PasswordResetRequestResult{}, nil
+	}
+
+	return s.passwordResetRequestFunc(ctx, input)
+}
+
+func (s stubAuthService) ResetPassword(ctx context.Context, input auth.ResetPasswordInput) error {
+	if s.resetPasswordFunc == nil {
+		return nil
+	}
+
+	return s.resetPasswordFunc(ctx, input)
 }
 
 func (s stubAuthService) Logout(ctx context.Context, sessionID string) error {

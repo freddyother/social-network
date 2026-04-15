@@ -128,6 +128,20 @@ export function checkNicknameAvailability(nickname, signal) {
   })
 }
 
+export function requestPasswordReset(email) {
+  return request("/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email })
+  })
+}
+
+export function resetPassword(details) {
+  return request("/auth/reset-password", {
+    method: "POST",
+    body: JSON.stringify(details)
+  })
+}
+
 export function logoutUser() {
   return request("/auth/logout", { method: "POST" })
 }

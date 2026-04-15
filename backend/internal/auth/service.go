@@ -3,11 +3,14 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"net/mail"
+	"net/url"
 	"strings"
 	"time"
 
@@ -20,6 +23,7 @@ var (
 	ErrNicknameAlreadyInUse = errors.New("nickname already in use")
 	ErrInvalidCredentials   = errors.New("invalid email or password")
 	ErrUnauthorized         = errors.New("authentication required")
+	ErrInvalidResetToken    = errors.New("invalid or expired password reset token")
 )
 
 type ValidationError struct {
@@ -60,9 +64,28 @@ type AuthResult struct {
 	Session Session
 }
 
+type PasswordResetConfig struct {
+	TokenTTL             time.Duration
+	ResetURL             string
+	RevealLinkInResponse bool
+}
+
 type NicknameAvailability struct {
 	Nickname  string `json:"nickname"`
 	Available bool   `json:"available"`
+}
+
+type PasswordResetRequestInput struct {
+	Email string `json:"email"`
+}
+
+type PasswordResetRequestResult struct {
+	ResetLink string `json:"resetLink,omitempty"`
+}
+
+type ResetPasswordInput struct {
+	Token       string `json:"token"`
+	NewPassword string `json:"newPassword"`
 }
 
 type RegisterInput struct {
@@ -82,19 +105,196 @@ type LoginInput struct {
 }
 
 type Service struct {
-	db         *sql.DB
-	sessionTTL time.Duration
+	db            *sql.DB
+	sessionTTL    time.Duration
+	passwordReset PasswordResetConfig
+	resetMailer   PasswordResetMailer
 }
 
-func NewService(db *sql.DB, sessionTTL time.Duration) Service {
+func NewService(db *sql.DB, sessionTTL time.Duration, passwordReset PasswordResetConfig, resetMailer PasswordResetMailer) Service {
 	if sessionTTL <= 0 {
 		sessionTTL = 30 * 24 * time.Hour
 	}
 
-	return Service{
-		db:         db,
-		sessionTTL: sessionTTL,
+	if passwordReset.TokenTTL <= 0 {
+		passwordReset.TokenTTL = 30 * time.Minute
 	}
+
+	return Service{
+		db:            db,
+		sessionTTL:    sessionTTL,
+		passwordReset: passwordReset,
+		resetMailer:   resetMailer,
+	}
+}
+
+func (s Service) RequestPasswordReset(ctx context.Context, input PasswordResetRequestInput) (PasswordResetRequestResult, error) {
+	normalizedInput, err := normalizePasswordResetRequestInput(input)
+	if err != nil {
+		return PasswordResetRequestResult{}, err
+	}
+
+	if s.resetMailer == nil && !s.passwordReset.RevealLinkInResponse {
+		return PasswordResetRequestResult{}, fmt.Errorf("password reset delivery is not configured")
+	}
+
+	record, err := s.findUserByEmail(ctx, normalizedInput.Email)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return PasswordResetRequestResult{}, nil
+		}
+
+		return PasswordResetRequestResult{}, err
+	}
+
+	resetToken, err := newToken(32)
+	if err != nil {
+		return PasswordResetRequestResult{}, fmt.Errorf("generate password reset token: %w", err)
+	}
+
+	resetLink, err := s.buildPasswordResetLink(resetToken)
+	if err != nil {
+		return PasswordResetRequestResult{}, err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return PasswordResetRequestResult{}, fmt.Errorf("begin password reset transaction: %w", err)
+	}
+
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err = tx.ExecContext(
+		ctx,
+		`DELETE FROM password_reset_tokens WHERE user_id = $1 OR used_at IS NOT NULL OR expires_at <= $2`,
+		record.ID,
+		time.Now().UTC(),
+	); err != nil {
+		return PasswordResetRequestResult{}, fmt.Errorf("clear password reset tokens: %w", err)
+	}
+
+	resetTokenID, err := newToken(16)
+	if err != nil {
+		return PasswordResetRequestResult{}, fmt.Errorf("generate password reset token id: %w", err)
+	}
+
+	expiresAt := time.Now().UTC().Add(s.passwordReset.TokenTTL)
+	if _, err = tx.ExecContext(
+		ctx,
+		`
+			INSERT INTO password_reset_tokens (
+				id,
+				user_id,
+				token_hash,
+				expires_at
+			)
+			VALUES ($1, $2, $3, $4)
+		`,
+		resetTokenID,
+		record.ID,
+		hashResetToken(resetToken),
+		expiresAt,
+	); err != nil {
+		return PasswordResetRequestResult{}, fmt.Errorf("insert password reset token: %w", err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return PasswordResetRequestResult{}, fmt.Errorf("commit password reset transaction: %w", err)
+	}
+
+	if s.resetMailer != nil {
+		if err := s.resetMailer.SendPasswordResetEmail(ctx, record.Email, displayName(record), resetLink); err != nil {
+			return PasswordResetRequestResult{}, fmt.Errorf("send password reset email: %w", err)
+		}
+
+		return PasswordResetRequestResult{}, nil
+	}
+
+	if s.passwordReset.RevealLinkInResponse {
+		log.Printf("password reset link for %s: %s", record.Email, resetLink)
+		return PasswordResetRequestResult{ResetLink: resetLink}, nil
+	}
+
+	return PasswordResetRequestResult{}, nil
+}
+
+func (s Service) ResetPassword(ctx context.Context, input ResetPasswordInput) error {
+	normalizedInput, err := normalizeResetPasswordInput(input)
+	if err != nil {
+		return err
+	}
+
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(normalizedInput.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin password reset transaction: %w", err)
+	}
+
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var resetTokenID string
+	var userID string
+	if err = tx.QueryRowContext(
+		ctx,
+		`
+			SELECT id, user_id
+			FROM password_reset_tokens
+			WHERE token_hash = $1 AND used_at IS NULL AND expires_at > $2
+		`,
+		hashResetToken(normalizedInput.Token),
+		time.Now().UTC(),
+	).Scan(&resetTokenID, &userID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrInvalidResetToken
+		}
+
+		return fmt.Errorf("load password reset token: %w", err)
+	}
+
+	if _, err = tx.ExecContext(
+		ctx,
+		`UPDATE users SET password_hash = $1, updated_at = $2 WHERE id = $3`,
+		string(passwordHash),
+		time.Now().UTC(),
+		userID,
+	); err != nil {
+		return fmt.Errorf("update password: %w", err)
+	}
+
+	if _, err = tx.ExecContext(
+		ctx,
+		`UPDATE password_reset_tokens SET used_at = $1 WHERE id = $2`,
+		time.Now().UTC(),
+		resetTokenID,
+	); err != nil {
+		return fmt.Errorf("mark password reset token used: %w", err)
+	}
+
+	if _, err = tx.ExecContext(ctx, `DELETE FROM password_reset_tokens WHERE user_id = $1 AND id <> $2`, userID, resetTokenID); err != nil {
+		return fmt.Errorf("clear other password reset tokens: %w", err)
+	}
+
+	if _, err = tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = $1`, userID); err != nil {
+		return fmt.Errorf("clear sessions after password reset: %w", err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("commit password reset transaction: %w", err)
+	}
+
+	return nil
 }
 
 func (s Service) CheckNicknameAvailability(ctx context.Context, nickname string) (NicknameAvailability, error) {
@@ -308,6 +508,42 @@ func (s Service) CurrentUser(ctx context.Context, sessionID string) (*User, erro
 	return &user, nil
 }
 
+func (s Service) findUserByEmail(ctx context.Context, email string) (userRecord, error) {
+	row := s.db.QueryRowContext(
+		ctx,
+		`
+			SELECT
+				id,
+				email,
+				password_hash,
+				first_name,
+				last_name,
+				date_of_birth,
+				avatar_url,
+				nickname,
+				about_me,
+				profile_visibility,
+				theme_preference,
+				created_at,
+				updated_at
+			FROM users
+			WHERE email = $1
+		`,
+		strings.ToLower(strings.TrimSpace(email)),
+	)
+
+	record, err := scanUserRecord(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return userRecord{}, sql.ErrNoRows
+		}
+
+		return userRecord{}, fmt.Errorf("find user by email: %w", err)
+	}
+
+	return record, nil
+}
+
 func (s Service) nicknameExists(ctx context.Context, nickname string) (bool, error) {
 	var exists bool
 	if err := s.db.QueryRowContext(
@@ -470,6 +706,53 @@ func validateNickname(nickname string) string {
 	return ""
 }
 
+func normalizePasswordResetRequestInput(input PasswordResetRequestInput) (PasswordResetRequestInput, error) {
+	normalized := PasswordResetRequestInput{
+		Email: strings.ToLower(strings.TrimSpace(input.Email)),
+	}
+
+	fieldErrors := make(map[string]string)
+	if normalized.Email == "" {
+		fieldErrors["email"] = "Email is required."
+	} else if _, err := mail.ParseAddress(normalized.Email); err != nil {
+		fieldErrors["email"] = "Enter a valid email address."
+	}
+
+	if len(fieldErrors) > 0 {
+		return PasswordResetRequestInput{}, &ValidationError{
+			Message: "Please correct the highlighted fields.",
+			Fields:  fieldErrors,
+		}
+	}
+
+	return normalized, nil
+}
+
+func normalizeResetPasswordInput(input ResetPasswordInput) (ResetPasswordInput, error) {
+	normalized := ResetPasswordInput{
+		Token:       strings.TrimSpace(input.Token),
+		NewPassword: input.NewPassword,
+	}
+
+	fieldErrors := make(map[string]string)
+	if normalized.Token == "" {
+		fieldErrors["token"] = "Reset token is required."
+	}
+
+	if len(normalized.NewPassword) < 8 {
+		fieldErrors["newPassword"] = "Password must be at least 8 characters."
+	}
+
+	if len(fieldErrors) > 0 {
+		return ResetPasswordInput{}, &ValidationError{
+			Message: "Please correct the highlighted fields.",
+			Fields:  fieldErrors,
+		}
+	}
+
+	return normalized, nil
+}
+
 func normalizeLoginInput(input LoginInput) (LoginInput, error) {
 	rawIdentifier := input.Identifier
 	if strings.TrimSpace(rawIdentifier) == "" {
@@ -498,6 +781,24 @@ func normalizeLoginInput(input LoginInput) (LoginInput, error) {
 	}
 
 	return normalized, nil
+}
+
+func (s Service) buildPasswordResetLink(token string) (string, error) {
+	resetURL := strings.TrimSpace(s.passwordReset.ResetURL)
+	if resetURL == "" {
+		return "", fmt.Errorf("password reset URL is not configured")
+	}
+
+	parsedURL, err := url.Parse(resetURL)
+	if err != nil {
+		return "", fmt.Errorf("parse password reset URL: %w", err)
+	}
+
+	query := parsedURL.Query()
+	query.Set("token", token)
+	parsedURL.RawQuery = query.Encode()
+
+	return parsedURL.String(), nil
 }
 
 type scanner interface {
@@ -576,6 +877,24 @@ func newToken(size int) (string, error) {
 	}
 
 	return hex.EncodeToString(bytes), nil
+}
+
+func hashResetToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+func displayName(record userRecord) string {
+	if nickname := strings.TrimSpace(nullableStringValue(record.Nickname)); nickname != "" {
+		return nickname
+	}
+
+	fullName := strings.TrimSpace(strings.Join([]string{record.FirstName, record.LastName}, " "))
+	if fullName != "" {
+		return fullName
+	}
+
+	return record.Email
 }
 
 func uniqueViolationConstraint(err error) string {

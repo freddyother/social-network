@@ -45,10 +45,20 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/social_network?sslmode=
 MIGRATIONS_DIR=./pkg/db/migrations/postgres
 UPLOADS_DIR=./uploads
 PUBLIC_BASE_URL=http://localhost:8080
+FRONTEND_BASE_URL=http://localhost:5173
 CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173
 SESSION_COOKIE_NAME=social_network_session
 SESSION_TTL_HOURS=720
 SESSION_COOKIE_SECURE=false
+PASSWORD_RESET_URL=http://localhost:5173/reset-password
+PASSWORD_RESET_TOKEN_TTL_MINUTES=30
+PASSWORD_RESET_REVEAL_LINK=true
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_FROM_EMAIL=
+SMTP_FROM_NAME=NEXO
 ```
 
 ## Local Run
@@ -64,6 +74,8 @@ go run ./cmd/server
 - `GET /api/v1/meta`
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/login`
+- `POST /api/v1/auth/forgot-password`
+- `POST /api/v1/auth/reset-password`
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
 - `GET /api/v1/posts`

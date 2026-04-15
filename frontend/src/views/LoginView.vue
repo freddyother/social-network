@@ -83,6 +83,9 @@ async function handleSubmit() {
           />
           <p v-if="fieldErrors.password" class="form-error">{{ fieldErrors.password }}</p>
         </label>
+        <RouterLink to="/forgot-password" class="auth-inline-link auth-inline-link--end">
+          Forgot password?
+        </RouterLink>
         <p v-if="formError" class="form-error">{{ formError }}</p>
         <button type="submit" class="button" :disabled="isSubmitting">
           {{ isSubmitting ? "Signing in..." : "Sign in" }}

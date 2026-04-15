@@ -179,3 +179,62 @@ func TestNormalizeLoginInputFallsBackToEmailField(t *testing.T) {
 		t.Fatalf("expected normalized identifier %q, got %q", "ada@example.com", normalized.Identifier)
 	}
 }
+
+func TestNormalizePasswordResetRequestInputRequiresEmail(t *testing.T) {
+	t.Parallel()
+
+	_, err := normalizePasswordResetRequestInput(PasswordResetRequestInput{})
+	if err == nil {
+		t.Fatal("expected normalizePasswordResetRequestInput to return an error")
+	}
+
+	validationErr, ok := err.(*ValidationError)
+	if !ok {
+		t.Fatalf("expected ValidationError, got %T", err)
+	}
+
+	if got := validationErr.Fields["email"]; got != "Email is required." {
+		t.Fatalf("unexpected email error: %q", got)
+	}
+}
+
+func TestNormalizeResetPasswordInputRequiresTokenAndPassword(t *testing.T) {
+	t.Parallel()
+
+	_, err := normalizeResetPasswordInput(ResetPasswordInput{})
+	if err == nil {
+		t.Fatal("expected normalizeResetPasswordInput to return an error")
+	}
+
+	validationErr, ok := err.(*ValidationError)
+	if !ok {
+		t.Fatalf("expected ValidationError, got %T", err)
+	}
+
+	if got := validationErr.Fields["token"]; got != "Reset token is required." {
+		t.Fatalf("unexpected token error: %q", got)
+	}
+
+	if got := validationErr.Fields["newPassword"]; got != "Password must be at least 8 characters." {
+		t.Fatalf("unexpected newPassword error: %q", got)
+	}
+}
+
+func TestBuildPasswordResetLinkAddsTokenQuery(t *testing.T) {
+	t.Parallel()
+
+	service := Service{
+		passwordReset: PasswordResetConfig{
+			ResetURL: "http://localhost:5173/reset-password",
+		},
+	}
+
+	link, err := service.buildPasswordResetLink("reset-token")
+	if err != nil {
+		t.Fatalf("buildPasswordResetLink returned error: %v", err)
+	}
+
+	if link != "http://localhost:5173/reset-password?token=reset-token" {
+		t.Fatalf("unexpected reset link: %q", link)
+	}
+}

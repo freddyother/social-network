@@ -18,6 +18,8 @@ type authService interface {
 	Register(ctx context.Context, input auth.RegisterInput) (auth.AuthResult, error)
 	Login(ctx context.Context, input auth.LoginInput) (auth.AuthResult, error)
 	CheckNicknameAvailability(ctx context.Context, nickname string) (auth.NicknameAvailability, error)
+	RequestPasswordReset(ctx context.Context, input auth.PasswordResetRequestInput) (auth.PasswordResetRequestResult, error)
+	ResetPassword(ctx context.Context, input auth.ResetPasswordInput) error
 	Logout(ctx context.Context, sessionID string) error
 	CurrentUser(ctx context.Context, sessionID string) (*auth.User, error)
 }
@@ -81,6 +83,46 @@ func (h AuthHandler) HandleNicknameAvailability(w stdlibhttp.ResponseWriter, r *
 	response.JSON(w, stdlibhttp.StatusOK, availability)
 }
 
+func (h AuthHandler) HandleForgotPassword(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	var input auth.PasswordResetRequestInput
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, stdlibhttp.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	result, err := h.service.RequestPasswordReset(r.Context(), input)
+	if err != nil {
+		h.handleServiceError(w, err)
+		return
+	}
+
+	payload := map[string]any{
+		"message": "If the account exists, we sent a password reset link.",
+	}
+	if result.ResetLink != "" {
+		payload["resetLink"] = result.ResetLink
+	}
+
+	response.JSON(w, stdlibhttp.StatusOK, payload)
+}
+
+func (h AuthHandler) HandleResetPassword(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	var input auth.ResetPasswordInput
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, stdlibhttp.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	if err := h.service.ResetPassword(r.Context(), input); err != nil {
+		h.handleServiceError(w, err)
+		return
+	}
+
+	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
+		"message": "Your password has been updated. You can sign in now.",
+	})
+}
+
 func (h AuthHandler) HandleLogout(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
 	sessionID := h.sessionIDFromRequest(r)
 	if err := h.service.Logout(r.Context(), sessionID); err != nil {
@@ -117,6 +159,10 @@ func (h AuthHandler) handleServiceError(w stdlibhttp.ResponseWriter, err error) 
 	case errors.Is(err, auth.ErrNicknameAlreadyInUse):
 		writeError(w, stdlibhttp.StatusConflict, "That nickname is already in use.", map[string]string{
 			"nickname": "That nickname is already in use.",
+		})
+	case errors.Is(err, auth.ErrInvalidResetToken):
+		writeError(w, stdlibhttp.StatusUnprocessableEntity, "That password reset link is invalid or has expired.", map[string]string{
+			"token": "That password reset link is invalid or has expired.",
 		})
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		writeError(w, stdlibhttp.StatusUnauthorized, "Invalid nickname, email, or password.", nil)
