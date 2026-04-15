@@ -60,6 +60,11 @@ type AuthResult struct {
 	Session Session
 }
 
+type NicknameAvailability struct {
+	Nickname  string `json:"nickname"`
+	Available bool   `json:"available"`
+}
+
 type RegisterInput struct {
 	Email       string `json:"email"`
 	Password    string `json:"password"`
@@ -90,6 +95,28 @@ func NewService(db *sql.DB, sessionTTL time.Duration) Service {
 		db:         db,
 		sessionTTL: sessionTTL,
 	}
+}
+
+func (s Service) CheckNicknameAvailability(ctx context.Context, nickname string) (NicknameAvailability, error) {
+	normalizedNickname := strings.TrimSpace(nickname)
+	if nicknameError := validateNickname(normalizedNickname); nicknameError != "" {
+		return NicknameAvailability{}, &ValidationError{
+			Message: "Please correct the highlighted fields.",
+			Fields: map[string]string{
+				"nickname": nicknameError,
+			},
+		}
+	}
+
+	exists, err := s.nicknameExists(ctx, normalizedNickname)
+	if err != nil {
+		return NicknameAvailability{}, err
+	}
+
+	return NicknameAvailability{
+		Nickname:  normalizedNickname,
+		Available: !exists,
+	}, nil
 }
 
 func (s Service) Register(ctx context.Context, input RegisterInput) (AuthResult, error) {
@@ -281,6 +308,19 @@ func (s Service) CurrentUser(ctx context.Context, sessionID string) (*User, erro
 	return &user, nil
 }
 
+func (s Service) nicknameExists(ctx context.Context, nickname string) (bool, error) {
+	var exists bool
+	if err := s.db.QueryRowContext(
+		ctx,
+		`SELECT EXISTS(SELECT 1 FROM users WHERE LOWER(BTRIM(nickname)) = $1)`,
+		strings.ToLower(strings.TrimSpace(nickname)),
+	).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check nickname existence: %w", err)
+	}
+
+	return exists, nil
+}
+
 func (s Service) findUserByLoginIdentifier(ctx context.Context, identifier string) (userRecord, error) {
 	row := s.db.QueryRowContext(
 		ctx,
@@ -382,10 +422,8 @@ func normalizeRegisterInput(input RegisterInput) (RegisterInput, time.Time, erro
 		normalized.DateOfBirth = birthDate.Format("2006-01-02")
 	}
 
-	if normalized.Nickname == "" {
-		fieldErrors["nickname"] = "Nickname is required."
-	} else if len(normalized.Nickname) > 80 {
-		fieldErrors["nickname"] = "Nickname must be 80 characters or fewer."
+	if nicknameError := validateNickname(normalized.Nickname); nicknameError != "" {
+		fieldErrors["nickname"] = nicknameError
 	}
 
 	if len(normalized.AboutMe) > 500 {
@@ -416,6 +454,20 @@ func parseDateOfBirth(value string) (time.Time, error) {
 	}
 
 	return time.Time{}, fmt.Errorf("date of birth must use YYYY-MM-DD or DD/MM/YYYY")
+}
+
+func validateNickname(nickname string) string {
+	normalizedNickname := strings.TrimSpace(nickname)
+
+	if normalizedNickname == "" {
+		return "Nickname is required."
+	}
+
+	if len(normalizedNickname) > 80 {
+		return "Nickname must be 80 characters or fewer."
+	}
+
+	return ""
 }
 
 func normalizeLoginInput(input LoginInput) (LoginInput, error) {

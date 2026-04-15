@@ -112,6 +112,16 @@ func TestNormalizeRegisterInputRequiresNickname(t *testing.T) {
 	}
 }
 
+func TestValidateNicknameRejectsTooLongNickname(t *testing.T) {
+	t.Parallel()
+
+	nickname := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+	if got := validateNickname(nickname); got != "Nickname must be 80 characters or fewer." {
+		t.Fatalf("unexpected nickname validation error: %q", got)
+	}
+}
+
 func TestUniqueViolationConstraintReturnsConstraintName(t *testing.T) {
 	t.Parallel()
 

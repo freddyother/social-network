@@ -17,6 +17,7 @@ import (
 type authService interface {
 	Register(ctx context.Context, input auth.RegisterInput) (auth.AuthResult, error)
 	Login(ctx context.Context, input auth.LoginInput) (auth.AuthResult, error)
+	CheckNicknameAvailability(ctx context.Context, nickname string) (auth.NicknameAvailability, error)
 	Logout(ctx context.Context, sessionID string) error
 	CurrentUser(ctx context.Context, sessionID string) (*auth.User, error)
 }
@@ -68,6 +69,16 @@ func (h AuthHandler) HandleLogin(w stdlibhttp.ResponseWriter, r *stdlibhttp.Requ
 	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
 		"user": result.User,
 	})
+}
+
+func (h AuthHandler) HandleNicknameAvailability(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	availability, err := h.service.CheckNicknameAvailability(r.Context(), r.URL.Query().Get("nickname"))
+	if err != nil {
+		h.handleServiceError(w, err)
+		return
+	}
+
+	response.JSON(w, stdlibhttp.StatusOK, availability)
 }
 
 func (h AuthHandler) HandleLogout(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {

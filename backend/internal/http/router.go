@@ -47,6 +47,7 @@ func NewRouter(cfg config.Config, db *sql.DB) stdlibhttp.Handler {
 	mux.HandleFunc("GET /api/v1/meta", metaHandler.Handle)
 	mux.HandleFunc("POST /api/v1/auth/register", authHandler.HandleRegister)
 	mux.HandleFunc("POST /api/v1/auth/login", authHandler.HandleLogin)
+	mux.HandleFunc("GET /api/v1/auth/nickname-availability", authHandler.HandleNicknameAvailability)
 	mux.HandleFunc("POST /api/v1/auth/logout", authHandler.HandleLogout)
 	mux.HandleFunc("GET /api/v1/auth/me", authHandler.HandleCurrentUser)
 	mux.HandleFunc("GET /api/v1/ws", wsHandler.HandleConnect)

@@ -113,6 +113,45 @@ func TestHandleRegisterReturnsConflictForNicknameAlreadyInUse(t *testing.T) {
 	}
 }
 
+func TestHandleNicknameAvailabilityReturnsAvailability(t *testing.T) {
+	t.Parallel()
+
+	handler := NewAuthHandler(stubAuthService{
+		nicknameAvailabilityFunc: func(ctx context.Context, nickname string) (auth.NicknameAvailability, error) {
+			if nickname != "adal" {
+				t.Fatalf("expected nickname adal, got %q", nickname)
+			}
+
+			return auth.NicknameAvailability{
+				Nickname:  nickname,
+				Available: false,
+			}, nil
+		},
+	}, config.SessionConfig{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/nickname-availability?nickname=adal", nil)
+	rec := httptest.NewRecorder()
+
+	handler.HandleNicknameAvailability(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var payload auth.NicknameAvailability
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+
+	if payload.Nickname != "adal" {
+		t.Fatalf("expected nickname adal, got %q", payload.Nickname)
+	}
+
+	if payload.Available {
+		t.Fatal("expected nickname to be unavailable")
+	}
+}
+
 func TestHandleLoginSetsSessionCookie(t *testing.T) {
 	t.Parallel()
 
@@ -224,10 +263,11 @@ func TestHandleLogoutClearsSessionCookie(t *testing.T) {
 }
 
 type stubAuthService struct {
-	registerFunc    func(ctx context.Context, input auth.RegisterInput) (auth.AuthResult, error)
-	loginFunc       func(ctx context.Context, input auth.LoginInput) (auth.AuthResult, error)
-	logoutFunc      func(ctx context.Context, sessionID string) error
-	currentUserFunc func(ctx context.Context, sessionID string) (*auth.User, error)
+	registerFunc             func(ctx context.Context, input auth.RegisterInput) (auth.AuthResult, error)
+	loginFunc                func(ctx context.Context, input auth.LoginInput) (auth.AuthResult, error)
+	nicknameAvailabilityFunc func(ctx context.Context, nickname string) (auth.NicknameAvailability, error)
+	logoutFunc               func(ctx context.Context, sessionID string) error
+	currentUserFunc          func(ctx context.Context, sessionID string) (*auth.User, error)
 }
 
 func (s stubAuthService) Register(ctx context.Context, input auth.RegisterInput) (auth.AuthResult, error) {
@@ -244,6 +284,14 @@ func (s stubAuthService) Login(ctx context.Context, input auth.LoginInput) (auth
 	}
 
 	return s.loginFunc(ctx, input)
+}
+
+func (s stubAuthService) CheckNicknameAvailability(ctx context.Context, nickname string) (auth.NicknameAvailability, error) {
+	if s.nicknameAvailabilityFunc == nil {
+		return auth.NicknameAvailability{}, nil
+	}
+
+	return s.nicknameAvailabilityFunc(ctx, nickname)
 }
 
 func (s stubAuthService) Logout(ctx context.Context, sessionID string) error {

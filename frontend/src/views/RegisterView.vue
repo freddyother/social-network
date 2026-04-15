@@ -1,8 +1,8 @@
 <script setup>
-import { reactive, ref } from "vue"
+import { onBeforeUnmount, reactive, ref, watch } from "vue"
 import { useRouter } from "vue-router"
 
-import { isApiError, registerUser } from "../services/api"
+import { checkNicknameAvailability, isApiError, registerUser } from "../services/api"
 import { toISODateInput } from "../utils/date"
 
 const router = useRouter()
@@ -29,6 +29,15 @@ const fieldErrors = reactive({
 
 const formError = ref("")
 const isSubmitting = ref(false)
+const isNicknameCheckPending = ref(false)
+const nicknameAvailability = reactive({
+  state: "idle",
+  message: "",
+  checkedNickname: ""
+})
+
+let nicknameCheckTimeoutId = 0
+let nicknameCheckAbortController = null
 
 function clearErrors() {
   formError.value = ""
@@ -38,6 +47,116 @@ function clearErrors() {
   })
 }
 
+function resetNicknameAvailability() {
+  nicknameAvailability.state = "idle"
+  nicknameAvailability.message = ""
+  nicknameAvailability.checkedNickname = ""
+}
+
+function clearNicknameCheckTimeout() {
+  if (!nicknameCheckTimeoutId) {
+    return
+  }
+
+  clearTimeout(nicknameCheckTimeoutId)
+  nicknameCheckTimeoutId = 0
+}
+
+function abortNicknameCheck() {
+  if (!nicknameCheckAbortController) {
+    return
+  }
+
+  nicknameCheckAbortController.abort()
+  nicknameCheckAbortController = null
+}
+
+async function runNicknameAvailabilityCheck(nickname) {
+  const normalizedNickname = nickname.trim()
+  if (!normalizedNickname) {
+    isNicknameCheckPending.value = false
+    resetNicknameAvailability()
+    return
+  }
+
+  nicknameAvailability.state = "checking"
+  nicknameAvailability.message = "Checking nickname availability..."
+  nicknameAvailability.checkedNickname = normalizedNickname
+  isNicknameCheckPending.value = true
+
+  const controller = new AbortController()
+  nicknameCheckAbortController = controller
+
+  try {
+    const availability = await checkNicknameAvailability(normalizedNickname, controller.signal)
+    if (nicknameCheckAbortController !== controller) {
+      return
+    }
+
+    nicknameAvailability.state = availability.available ? "available" : "unavailable"
+    nicknameAvailability.message = availability.available ? "Nickname is available." : ""
+    nicknameAvailability.checkedNickname = normalizedNickname
+
+    if (!availability.available) {
+      fieldErrors.nickname = "That nickname is already in use."
+    }
+  } catch (error) {
+    if (controller.signal.aborted) {
+      return
+    }
+
+    if (isApiError(error, 422)) {
+      fieldErrors.nickname = error.payload?.fields?.nickname || error.message
+      resetNicknameAvailability()
+      return
+    }
+
+    nicknameAvailability.state = "error"
+    nicknameAvailability.message = "Could not verify nickname right now."
+    nicknameAvailability.checkedNickname = normalizedNickname
+  } finally {
+    if (nicknameCheckAbortController === controller) {
+      nicknameCheckAbortController = null
+    }
+
+    isNicknameCheckPending.value = false
+  }
+}
+
+watch(
+  () => form.nickname,
+  (value) => {
+    clearNicknameCheckTimeout()
+    abortNicknameCheck()
+    fieldErrors.nickname = ""
+    isNicknameCheckPending.value = false
+
+    const normalizedNickname = value.trim()
+    if (!normalizedNickname) {
+      resetNicknameAvailability()
+      return
+    }
+
+    if (normalizedNickname.length > 80) {
+      resetNicknameAvailability()
+      fieldErrors.nickname = "Nickname must be 80 characters or fewer."
+      return
+    }
+
+    resetNicknameAvailability()
+    isNicknameCheckPending.value = true
+    nicknameCheckTimeoutId = setTimeout(() => {
+      nicknameCheckTimeoutId = 0
+      void runNicknameAvailabilityCheck(normalizedNickname)
+    }, 350)
+  }
+)
+
+onBeforeUnmount(() => {
+  clearNicknameCheckTimeout()
+  abortNicknameCheck()
+})
+
 async function handleSubmit() {
   clearErrors()
   isSubmitting.value = true
@@ -46,6 +165,18 @@ async function handleSubmit() {
     const normalizedDateOfBirth = toISODateInput(form.dateOfBirth)
     if (!normalizedDateOfBirth) {
       fieldErrors.dateOfBirth = "Use a valid date like 27/02/1987 or 1987-02-27."
+      formError.value = "Please correct the highlighted fields."
+      return
+    }
+
+    if (isNicknameCheckPending.value) {
+      fieldErrors.nickname = "Wait a moment while we verify your nickname."
+      formError.value = "Please correct the highlighted fields."
+      return
+    }
+
+    if (nicknameAvailability.state === "unavailable") {
+      fieldErrors.nickname = "That nickname is already in use."
       formError.value = "Please correct the highlighted fields."
       return
     }
@@ -153,6 +284,15 @@ async function handleSubmit() {
             required
           />
           <p v-if="fieldErrors.nickname" class="form-error">{{ fieldErrors.nickname }}</p>
+          <p
+            v-else-if="nicknameAvailability.message"
+            :class="[
+              'form-hint',
+              nicknameAvailability.state === 'available' ? 'form-hint--success' : 'form-hint--muted'
+            ]"
+          >
+            {{ nicknameAvailability.message }}
+          </p>
         </label>
         <label class="form-grid__full">
           <span>About Me</span>
@@ -165,7 +305,11 @@ async function handleSubmit() {
           <p v-if="fieldErrors.aboutMe" class="form-error">{{ fieldErrors.aboutMe }}</p>
         </label>
         <p v-if="formError" class="form-error form-grid__full">{{ formError }}</p>
-        <button type="submit" class="button form-grid__full" :disabled="isSubmitting">
+        <button
+          type="submit"
+          class="button form-grid__full"
+          :disabled="isSubmitting || isNicknameCheckPending || nicknameAvailability.state === 'unavailable'"
+        >
           {{ isSubmitting ? "Creating account..." : "Create account" }}
         </button>
       </form>

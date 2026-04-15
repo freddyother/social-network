@@ -120,6 +120,14 @@ export async function registerUser(details) {
   return normalizeUser(payload?.user || null)
 }
 
+export function checkNicknameAvailability(nickname, signal) {
+  const params = new URLSearchParams({ nickname })
+  return request(`/auth/nickname-availability?${params.toString()}`, {
+    method: "GET",
+    signal
+  })
+}
+
 export function logoutUser() {
   return request("/auth/logout", { method: "POST" })
 }
