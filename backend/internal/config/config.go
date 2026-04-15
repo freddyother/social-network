@@ -56,6 +56,11 @@ func Load() Config {
 		getEnv("FRONTEND_BASE_URL", "http://localhost:5173"),
 		"/",
 	)
+	smtpUsername := getEnvAny([]string{"SMTP_USERNAME", "SPRING_MAIL_USERNAME"}, "")
+	smtpFromEmail := getEnvAny(
+		[]string{"SMTP_FROM_EMAIL", "SPRING_MAIL_FROM_EMAIL", "SMTP_USERNAME", "SPRING_MAIL_USERNAME"},
+		"",
+	)
 
 	return Config{
 		AppEnv:          appEnv,
@@ -88,11 +93,11 @@ func Load() Config {
 			RevealLinkInResponse: getEnvBool("PASSWORD_RESET_REVEAL_LINK", appEnv != "production"),
 		},
 		Mail: MailConfig{
-			SMTPHost:  getEnv("SMTP_HOST", ""),
-			SMTPPort:  getEnvInt("SMTP_PORT", 587),
-			Username:  getEnv("SMTP_USERNAME", ""),
-			Password:  getEnv("SMTP_PASSWORD", ""),
-			FromEmail: getEnv("SMTP_FROM_EMAIL", ""),
+			SMTPHost:  getEnvAny([]string{"SMTP_HOST", "SPRING_MAIL_HOST"}, ""),
+			SMTPPort:  getEnvIntAny([]string{"SMTP_PORT", "SPRING_MAIL_PORT"}, 587),
+			Username:  smtpUsername,
+			Password:  getEnvAny([]string{"SMTP_PASSWORD", "SPRING_MAIL_PASSWORD"}, ""),
+			FromEmail: smtpFromEmail,
 			FromName:  getEnv("SMTP_FROM_NAME", "NEXO"),
 		},
 	}
@@ -101,6 +106,16 @@ func Load() Config {
 func getEnv(key, fallback string) string {
 	if value := strings.TrimSpace(strings.Trim(os.Getenv(key), "\"")); value != "" {
 		return value
+	}
+
+	return fallback
+}
+
+func getEnvAny(keys []string, fallback string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(strings.Trim(os.Getenv(key), "\"")); value != "" {
+			return value
+		}
 	}
 
 	return fallback
@@ -150,6 +165,20 @@ func getEnvDurationMinutes(key string, fallbackMinutes int) time.Duration {
 
 func getEnvInt(key string, fallback int) int {
 	value := getEnv(key, "")
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+
+	return parsed
+}
+
+func getEnvIntAny(keys []string, fallback int) int {
+	value := getEnvAny(keys, "")
 	if value == "" {
 		return fallback
 	}

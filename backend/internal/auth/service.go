@@ -208,6 +208,7 @@ func (s Service) RequestPasswordReset(ctx context.Context, input PasswordResetRe
 
 	if s.resetMailer != nil {
 		if err := s.resetMailer.SendPasswordResetEmail(ctx, record.Email, displayName(record), resetLink); err != nil {
+			log.Printf("password reset email send failed for %s: %v", record.Email, err)
 			return PasswordResetRequestResult{}, fmt.Errorf("send password reset email: %w", err)
 		}
 

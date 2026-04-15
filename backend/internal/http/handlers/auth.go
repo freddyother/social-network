@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	stdlibhttp "net/http"
 	"strings"
 	"time"
@@ -169,6 +170,7 @@ func (h AuthHandler) handleServiceError(w stdlibhttp.ResponseWriter, err error) 
 	case errors.Is(err, auth.ErrUnauthorized):
 		writeError(w, stdlibhttp.StatusUnauthorized, "Authentication required.", nil)
 	default:
+		log.Printf("auth handler error: %T: %v", err, err)
 		writeError(w, stdlibhttp.StatusInternalServerError, "Something went wrong on the server.", nil)
 	}
 }
