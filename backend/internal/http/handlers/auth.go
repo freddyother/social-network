@@ -103,6 +103,10 @@ func (h AuthHandler) handleServiceError(w stdlibhttp.ResponseWriter, err error) 
 		writeError(w, stdlibhttp.StatusConflict, "An account with that email already exists.", map[string]string{
 			"email": "That email is already in use.",
 		})
+	case errors.Is(err, auth.ErrNicknameAlreadyInUse):
+		writeError(w, stdlibhttp.StatusConflict, "That nickname is already in use.", map[string]string{
+			"nickname": "That nickname is already in use.",
+		})
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		writeError(w, stdlibhttp.StatusUnauthorized, "Invalid email or password.", nil)
 	case errors.Is(err, auth.ErrUnauthorized):

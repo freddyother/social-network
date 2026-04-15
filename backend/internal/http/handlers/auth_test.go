@@ -42,6 +42,7 @@ func TestHandleRegisterDoesNotSetSessionCookie(t *testing.T) {
 		"firstName":   "Ada",
 		"lastName":    "Lovelace",
 		"dateOfBirth": "1815-12-10",
+		"nickname":    "adal",
 	})
 	if err != nil {
 		t.Fatalf("marshal body: %v", err)
@@ -59,6 +60,56 @@ func TestHandleRegisterDoesNotSetSessionCookie(t *testing.T) {
 	cookies := rec.Result().Cookies()
 	if len(cookies) != 0 {
 		t.Fatalf("expected no cookie to be set on register, got %#v", cookies)
+	}
+}
+
+func TestHandleRegisterReturnsConflictForNicknameAlreadyInUse(t *testing.T) {
+	t.Parallel()
+
+	handler := NewAuthHandler(stubAuthService{
+		registerFunc: func(ctx context.Context, input auth.RegisterInput) (auth.AuthResult, error) {
+			return auth.AuthResult{}, auth.ErrNicknameAlreadyInUse
+		},
+	}, config.SessionConfig{
+		CookieName: "social_network_session",
+		TTL:        24 * time.Hour,
+	})
+
+	body, err := json.Marshal(map[string]string{
+		"email":       "ada@example.com",
+		"password":    "password123",
+		"firstName":   "Ada",
+		"lastName":    "Lovelace",
+		"dateOfBirth": "1815-12-10",
+		"nickname":    "adal",
+	})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handler.HandleRegister(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected status %d, got %d", http.StatusConflict, rec.Code)
+	}
+
+	var payload struct {
+		Error  string            `json:"error"`
+		Fields map[string]string `json:"fields"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+
+	if payload.Error != "That nickname is already in use." {
+		t.Fatalf("unexpected error message: %q", payload.Error)
+	}
+
+	if payload.Fields["nickname"] != "That nickname is already in use." {
+		t.Fatalf("unexpected nickname field error: %q", payload.Fields["nickname"])
 	}
 }
 

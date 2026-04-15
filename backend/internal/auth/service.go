@@ -16,9 +16,10 @@ import (
 )
 
 var (
-	ErrEmailAlreadyInUse  = errors.New("email already in use")
-	ErrInvalidCredentials = errors.New("invalid email or password")
-	ErrUnauthorized       = errors.New("authentication required")
+	ErrEmailAlreadyInUse    = errors.New("email already in use")
+	ErrNicknameAlreadyInUse = errors.New("nickname already in use")
+	ErrInvalidCredentials   = errors.New("invalid email or password")
+	ErrUnauthorized         = errors.New("authentication required")
 )
 
 type ValidationError struct {
@@ -159,8 +160,11 @@ func (s Service) Register(ctx context.Context, input RegisterInput) (AuthResult,
 
 	record, err := scanUserRecord(row)
 	if err != nil {
-		if isUniqueViolation(err) {
+		switch uniqueViolationConstraint(err) {
+		case "users_email_key":
 			return AuthResult{}, ErrEmailAlreadyInUse
+		case "idx_users_nickname_unique":
+			return AuthResult{}, ErrNicknameAlreadyInUse
 		}
 
 		return AuthResult{}, fmt.Errorf("insert user: %w", err)
@@ -377,7 +381,9 @@ func normalizeRegisterInput(input RegisterInput) (RegisterInput, time.Time, erro
 		normalized.DateOfBirth = birthDate.Format("2006-01-02")
 	}
 
-	if len(normalized.Nickname) > 80 {
+	if normalized.Nickname == "" {
+		fieldErrors["nickname"] = "Nickname is required."
+	} else if len(normalized.Nickname) > 80 {
 		fieldErrors["nickname"] = "Nickname must be 80 characters or fewer."
 	}
 
@@ -514,7 +520,11 @@ func newToken(size int) (string, error) {
 	return hex.EncodeToString(bytes), nil
 }
 
-func isUniqueViolation(err error) bool {
+func uniqueViolationConstraint(err error) string {
 	var pqErr *pq.Error
-	return errors.As(err, &pqErr) && pqErr.Code == "23505"
+	if !errors.As(err, &pqErr) || pqErr.Code != "23505" {
+		return ""
+	}
+
+	return pqErr.Constraint
 }

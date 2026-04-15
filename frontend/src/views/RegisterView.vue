@@ -148,8 +148,9 @@ async function handleSubmit() {
           <input
             v-model.trim="form.nickname"
             type="text"
-            placeholder="Optional"
+            placeholder="Choose a nickname"
             :aria-invalid="Boolean(fieldErrors.nickname)"
+            required
           />
           <p v-if="fieldErrors.nickname" class="form-error">{{ fieldErrors.nickname }}</p>
         </label>

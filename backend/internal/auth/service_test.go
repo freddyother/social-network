@@ -1,6 +1,10 @@
 package auth
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/lib/pq"
+)
 
 func TestNormalizeRegisterInputAcceptsISODateOfBirth(t *testing.T) {
 	t.Parallel()
@@ -11,6 +15,7 @@ func TestNormalizeRegisterInputAcceptsISODateOfBirth(t *testing.T) {
 		FirstName:   "Ada",
 		LastName:    "Lovelace",
 		DateOfBirth: "1815-12-10",
+		Nickname:    "adal",
 	}
 
 	normalized, birthDate, err := normalizeRegisterInput(input)
@@ -36,6 +41,7 @@ func TestNormalizeRegisterInputAcceptsSlashDateOfBirth(t *testing.T) {
 		FirstName:   "Ada",
 		LastName:    "Lovelace",
 		DateOfBirth: "10/12/1815",
+		Nickname:    "adal",
 	}
 
 	normalized, birthDate, err := normalizeRegisterInput(input)
@@ -61,6 +67,7 @@ func TestNormalizeRegisterInputRejectsUnsupportedDateOfBirthFormat(t *testing.T)
 		FirstName:   "Ada",
 		LastName:    "Lovelace",
 		DateOfBirth: "1815/12/10",
+		Nickname:    "adal",
 	}
 
 	_, _, err := normalizeRegisterInput(input)
@@ -75,5 +82,58 @@ func TestNormalizeRegisterInputRejectsUnsupportedDateOfBirthFormat(t *testing.T)
 
 	if got := validationErr.Fields["dateOfBirth"]; got != "Date of birth must use YYYY-MM-DD or DD/MM/YYYY." {
 		t.Fatalf("unexpected dateOfBirth error: %q", got)
+	}
+}
+
+func TestNormalizeRegisterInputRequiresNickname(t *testing.T) {
+	t.Parallel()
+
+	input := RegisterInput{
+		Email:       "ada@example.com",
+		Password:    "password123",
+		FirstName:   "Ada",
+		LastName:    "Lovelace",
+		DateOfBirth: "1815-12-10",
+		Nickname:    "",
+	}
+
+	_, _, err := normalizeRegisterInput(input)
+	if err == nil {
+		t.Fatal("expected normalizeRegisterInput to require nickname")
+	}
+
+	validationErr, ok := err.(*ValidationError)
+	if !ok {
+		t.Fatalf("expected ValidationError, got %T", err)
+	}
+
+	if got := validationErr.Fields["nickname"]; got != "Nickname is required." {
+		t.Fatalf("unexpected nickname error: %q", got)
+	}
+}
+
+func TestUniqueViolationConstraintReturnsConstraintName(t *testing.T) {
+	t.Parallel()
+
+	err := &pq.Error{
+		Code:       "23505",
+		Constraint: "idx_users_nickname_unique",
+	}
+
+	if got := uniqueViolationConstraint(err); got != "idx_users_nickname_unique" {
+		t.Fatalf("expected constraint name, got %q", got)
+	}
+}
+
+func TestUniqueViolationConstraintReturnsEmptyForNonUniqueErrors(t *testing.T) {
+	t.Parallel()
+
+	err := &pq.Error{
+		Code:       "23503",
+		Constraint: "users_email_key",
+	}
+
+	if got := uniqueViolationConstraint(err); got != "" {
+		t.Fatalf("expected empty constraint name, got %q", got)
 	}
 }
