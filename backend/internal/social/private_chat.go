@@ -342,6 +342,15 @@ func (s Service) SendPrivateMessage(ctx context.Context, sender auth.User, partn
 		return PrivateMessage{}, err
 	}
 
+	canMessage, err := s.canMessageUserWithReader(ctx, tx, sender.ID, normalizedPartnerID)
+	if err != nil {
+		return PrivateMessage{}, err
+	}
+
+	if !canMessage {
+		return PrivateMessage{}, ErrForbidden
+	}
+
 	partnerOnline := s.publisher.HasUserConnection(normalizedPartnerID)
 	partnerViewingConversation := s.publisher.IsViewingConversation(normalizedPartnerID, sender.ID)
 
@@ -415,6 +424,47 @@ func (s Service) SendPrivateMessage(ctx context.Context, sender auth.User, partn
 	}
 
 	return message, nil
+}
+
+func (s Service) canMessageUserWithReader(ctx context.Context, reader sqlReader, viewerID, targetID string) (bool, error) {
+	normalizedViewerID := strings.TrimSpace(viewerID)
+	normalizedTargetID := strings.TrimSpace(targetID)
+	if normalizedViewerID == "" || normalizedTargetID == "" {
+		return false, ErrNotFound
+	}
+
+	if normalizedViewerID == normalizedTargetID {
+		return false, nil
+	}
+
+	var (
+		profileVisibility string
+		viewerFollows     bool
+	)
+	if err := reader.QueryRowContext(
+		ctx,
+		`
+			SELECT
+				u.profile_visibility,
+				EXISTS (
+					SELECT 1
+					FROM followers f
+					WHERE f.follower_id = $1 AND f.followee_id = u.id
+				)
+			FROM users u
+			WHERE u.id = $2
+		`,
+		normalizedViewerID,
+		normalizedTargetID,
+	).Scan(&profileVisibility, &viewerFollows); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, ErrNotFound
+		}
+
+		return false, fmt.Errorf("load direct message permission: %w", err)
+	}
+
+	return profileVisibility == "public" || viewerFollows, nil
 }
 
 func (s Service) MarkMessageDelivered(ctx context.Context, recipientID, messageID string) error {

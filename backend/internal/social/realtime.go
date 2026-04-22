@@ -44,6 +44,10 @@ type PostEvent struct {
 	Post Post `json:"post"`
 }
 
+type PostDeletedEvent struct {
+	PostID string `json:"postId"`
+}
+
 type notificationDelivery struct {
 	UserID       string
 	Notification Notification

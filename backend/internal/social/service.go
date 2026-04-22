@@ -322,6 +322,75 @@ func (s Service) UpdatePost(ctx context.Context, author auth.User, postID string
 	return post, nil
 }
 
+func (s Service) DeletePost(ctx context.Context, author auth.User, postID string) error {
+	existingPost, err := s.loadPostEditorState(ctx, s.db, postID)
+	if err != nil {
+		return err
+	}
+
+	if existingPost.AuthorID != author.ID {
+		return ErrForbidden
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin delete post transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err = tx.ExecContext(
+		ctx,
+		`
+			DELETE FROM notifications
+			WHERE entity_type = 'post' AND entity_id = $1
+		`,
+		postID,
+	); err != nil {
+		return fmt.Errorf("delete post notifications: %w", err)
+	}
+
+	result, execErr := tx.ExecContext(
+		ctx,
+		`
+			DELETE FROM posts
+			WHERE id = $1 AND author_id = $2
+		`,
+		postID,
+		author.ID,
+	)
+	if execErr != nil {
+		return fmt.Errorf("delete post: %w", execErr)
+	}
+
+	rowsAffected, rowsErr := result.RowsAffected()
+	if rowsErr != nil {
+		return fmt.Errorf("count deleted posts: %w", rowsErr)
+	}
+
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete post transaction: %w", err)
+	}
+
+	_ = os.RemoveAll(filepath.Join(s.uploadsDir, "posts", postID))
+
+	s.publisher.PublishToPost(postID, "post.deleted", PostDeletedEvent{
+		PostID: postID,
+	})
+	s.publisher.PublishToUser(author.ID, "post.deleted", PostDeletedEvent{
+		PostID: postID,
+	})
+
+	return nil
+}
+
 func (s Service) Feed(ctx context.Context, viewerID string) ([]Post, error) {
 	rows, err := s.db.QueryContext(
 		ctx,
@@ -606,6 +675,54 @@ func (s Service) FollowUser(ctx context.Context, followerID, followeeID string) 
 	}
 
 	return FollowActionResult{Status: "requested"}, nil
+}
+
+func (s Service) UnfollowUser(ctx context.Context, followerID, followeeID string) (FollowActionResult, error) {
+	if strings.TrimSpace(followerID) == "" || strings.TrimSpace(followeeID) == "" {
+		return FollowActionResult{}, ErrNotFound
+	}
+
+	if followerID == followeeID {
+		return FollowActionResult{}, ErrFollowYourself
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return FollowActionResult{}, fmt.Errorf("begin unfollow transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var targetExists bool
+	if err = tx.QueryRowContext(
+		ctx,
+		`SELECT EXISTS (SELECT 1 FROM users WHERE id = $1)`,
+		followeeID,
+	).Scan(&targetExists); err != nil {
+		return FollowActionResult{}, fmt.Errorf("check unfollow target: %w", err)
+	}
+
+	if !targetExists {
+		return FollowActionResult{}, ErrNotFound
+	}
+
+	if _, err = tx.ExecContext(
+		ctx,
+		`DELETE FROM followers WHERE follower_id = $1 AND followee_id = $2`,
+		followerID,
+		followeeID,
+	); err != nil {
+		return FollowActionResult{}, fmt.Errorf("delete follower: %w", err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return FollowActionResult{}, fmt.Errorf("commit unfollow transaction: %w", err)
+	}
+
+	return FollowActionResult{Status: "not_following"}, nil
 }
 
 func (s Service) IncomingFollowRequests(ctx context.Context, userID string) ([]FollowRequest, error) {

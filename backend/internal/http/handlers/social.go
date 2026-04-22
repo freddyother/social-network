@@ -16,8 +16,10 @@ import (
 type socialService interface {
 	CreatePost(ctx context.Context, author auth.User, input social.CreatePostInput) (social.Post, error)
 	UpdatePost(ctx context.Context, author auth.User, postID string, input social.UpdatePostInput) (social.Post, error)
+	DeletePost(ctx context.Context, author auth.User, postID string) error
 	Feed(ctx context.Context, viewerID string) ([]social.Post, error)
 	MyPosts(ctx context.Context, userID string) ([]social.Post, error)
+	ProfileByHandle(ctx context.Context, viewerID, handle string) (social.PublicProfilePage, error)
 	Conversations(ctx context.Context, userID string) ([]social.ConversationSummary, error)
 	Conversation(ctx context.Context, viewerID, partnerID string) (social.ConversationThread, error)
 	SendPrivateMessage(ctx context.Context, sender auth.User, partnerID string, input social.SendPrivateMessageInput) (social.PrivateMessage, error)
@@ -27,6 +29,7 @@ type socialService interface {
 	UpdateComment(ctx context.Context, author auth.User, postID, commentID string, input social.UpdateCommentInput) (social.Comment, error)
 	DiscoverUsers(ctx context.Context, viewerID string) ([]social.SuggestedUser, error)
 	FollowUser(ctx context.Context, followerID, followeeID string) (social.FollowActionResult, error)
+	UnfollowUser(ctx context.Context, followerID, followeeID string) (social.FollowActionResult, error)
 	IncomingFollowRequests(ctx context.Context, userID string) ([]social.FollowRequest, error)
 	RespondToFollowRequest(ctx context.Context, userID, requestID string, accept bool) error
 	UpdateProfile(ctx context.Context, userID string, input social.UpdateProfileInput) (auth.User, error)
@@ -82,6 +85,30 @@ func (h SocialHandler) HandleMyPosts(w stdlibhttp.ResponseWriter, r *stdlibhttp.
 
 	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
 		"posts": posts,
+	})
+}
+
+func (h SocialHandler) HandleUserProfile(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	currentUser, err := h.currentUserIfAvailable(r)
+	if err != nil {
+		h.handleSocialError(w, err)
+		return
+	}
+
+	viewerID := ""
+	if currentUser != nil {
+		viewerID = currentUser.ID
+	}
+
+	result, err := h.service.ProfileByHandle(r.Context(), viewerID, strings.TrimSpace(r.PathValue("handle")))
+	if err != nil {
+		h.handleSocialError(w, err)
+		return
+	}
+
+	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
+		"profile": result.Profile,
+		"posts":   result.Posts,
 	})
 }
 
@@ -237,6 +264,20 @@ func (h SocialHandler) HandleUpdatePost(w stdlibhttp.ResponseWriter, r *stdlibht
 	})
 }
 
+func (h SocialHandler) HandleDeletePost(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	currentUser, ok := h.requireCurrentUser(w, r)
+	if !ok {
+		return
+	}
+
+	if err := h.service.DeletePost(r.Context(), *currentUser, strings.TrimSpace(r.PathValue("postID"))); err != nil {
+		h.handleSocialError(w, err)
+		return
+	}
+
+	w.WriteHeader(stdlibhttp.StatusNoContent)
+}
+
 func (h SocialHandler) HandleUpdateAvatar(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
 	currentUser, ok := h.requireCurrentUser(w, r)
 	if !ok {
@@ -377,6 +418,21 @@ func (h SocialHandler) HandleFollowUser(w stdlibhttp.ResponseWriter, r *stdlibht
 	}
 
 	result, err := h.service.FollowUser(r.Context(), currentUser.ID, strings.TrimSpace(r.PathValue("userID")))
+	if err != nil {
+		h.handleSocialError(w, err)
+		return
+	}
+
+	response.JSON(w, stdlibhttp.StatusOK, result)
+}
+
+func (h SocialHandler) HandleUnfollowUser(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	currentUser, ok := h.requireCurrentUser(w, r)
+	if !ok {
+		return
+	}
+
+	result, err := h.service.UnfollowUser(r.Context(), currentUser.ID, strings.TrimSpace(r.PathValue("userID")))
 	if err != nil {
 		h.handleSocialError(w, err)
 		return
@@ -553,6 +609,19 @@ func (h SocialHandler) requireCurrentUser(w stdlibhttp.ResponseWriter, r *stdlib
 	}
 
 	return user, true
+}
+
+func (h SocialHandler) currentUserIfAvailable(r *stdlibhttp.Request) (*auth.User, error) {
+	user, err := h.auth.CurrentUser(r.Context(), h.sessionIDFromRequest(r))
+	if err != nil {
+		if errors.Is(err, auth.ErrUnauthorized) {
+			return nil, nil
+		}
+
+		return nil, err
+	}
+
+	return user, nil
 }
 
 func (h SocialHandler) sessionIDFromRequest(r *stdlibhttp.Request) string {

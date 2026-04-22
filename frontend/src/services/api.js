@@ -50,6 +50,17 @@ function normalizeConversation(conversation) {
   }
 }
 
+function normalizePublicProfile(profile) {
+  if (!profile) {
+    return null
+  }
+
+  return {
+    ...profile,
+    avatarUrl: resolveUploadUrl(profile.avatarUrl)
+  }
+}
+
 async function request(path, options = {}) {
   const headers = new Headers({
     Accept: "application/json",
@@ -156,6 +167,15 @@ export async function fetchMyPosts() {
   return payload?.posts || []
 }
 
+export async function fetchUserProfile(handle) {
+  const payload = await request(`/users/${encodeURIComponent(handle)}`, { method: "GET" })
+
+  return {
+    profile: normalizePublicProfile(payload?.profile || null),
+    posts: payload?.posts || []
+  }
+}
+
 export async function fetchChatConversations() {
   const payload = await request("/chat/conversations", { method: "GET" })
   return (payload?.conversations || []).map(normalizeConversation)
@@ -223,6 +243,10 @@ export async function updatePost(postId, post) {
   return payload?.post || null
 }
 
+export function deletePost(postId) {
+  return request(`/posts/${postId}`, { method: "DELETE" })
+}
+
 export async function createComment(postId, comment) {
   const payload = await request(`/posts/${postId}/comments`, {
     method: "POST",
@@ -248,6 +272,10 @@ export async function fetchDiscoverUsers() {
 
 export function followUser(userId) {
   return request(`/users/${userId}/follow`, { method: "POST" })
+}
+
+export function unfollowUser(userId) {
+  return request(`/users/${userId}/follow`, { method: "DELETE" })
 }
 
 export async function fetchFollowRequests() {
