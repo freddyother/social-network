@@ -9,6 +9,7 @@ import {
   fetchDiscoverUsers,
   fetchFeed,
   fetchMyPosts,
+  fetchPost,
   followUser,
   isApiError,
   updateComment,
@@ -741,7 +742,7 @@ async function focusPostFromRoute() {
     return
   }
 
-  const targetPost = posts.value.find((post) => post.id === postId)
+  const targetPost = await ensureRoutePostLoaded(postId)
   if (!targetPost) {
     return
   }
@@ -766,6 +767,39 @@ async function focusPostFromRoute() {
     behavior: "smooth",
     block: "start"
   })
+}
+
+async function ensureRoutePostLoaded(postId) {
+  const existingPost = posts.value.find((post) => post.id === postId)
+  if (existingPost) {
+    return existingPost
+  }
+
+  try {
+    const loadedPost = await fetchPost(postId)
+    if (!loadedPost) {
+      return null
+    }
+
+    if (isMyPostsScope.value && loadedPost.author?.id !== currentUserId.value) {
+      return null
+    }
+
+    if (!posts.value.some((post) => post.id === loadedPost.id)) {
+      posts.value = [loadedPost, ...posts.value]
+      activeSlides[loadedPost.id] = 0
+      ensureCommentState(loadedPost.id)
+      syncPostEditForm(loadedPost)
+    }
+
+    return loadedPost
+  } catch (error) {
+    if (!isApiError(error, 403) && !isApiError(error, 404)) {
+      requestError.value = error instanceof Error ? error.message : "Could not open that post."
+    }
+
+    return null
+  }
 }
 
 function currentSlide(post) {

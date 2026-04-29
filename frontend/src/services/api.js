@@ -61,6 +61,17 @@ function normalizePublicProfile(profile) {
   }
 }
 
+function normalizeGroup(group) {
+  if (!group) {
+    return null
+  }
+
+  return {
+    ...group,
+    creator: normalizeUser(group.creator)
+  }
+}
+
 async function request(path, options = {}) {
   const headers = new Headers({
     Accept: "application/json",
@@ -167,12 +178,56 @@ export async function fetchMyPosts() {
   return payload?.posts || []
 }
 
+export async function fetchPost(postId) {
+  const payload = await request(`/posts/${postId}`, { method: "GET" })
+  return payload?.post || null
+}
+
 export async function fetchUserProfile(handle) {
   const payload = await request(`/users/${encodeURIComponent(handle)}`, { method: "GET" })
 
   return {
     profile: normalizePublicProfile(payload?.profile || null),
     posts: payload?.posts || []
+  }
+}
+
+export async function fetchGroups() {
+  const payload = await request("/groups", { method: "GET" })
+  return (payload?.groups || []).map(normalizeGroup)
+}
+
+export async function fetchGroup(groupId) {
+  const payload = await request(`/groups/${groupId}`, { method: "GET" })
+  return normalizeGroup(payload?.group || null)
+}
+
+export async function createGroup(group) {
+  const payload = await request("/groups", {
+    method: "POST",
+    body: JSON.stringify(group)
+  })
+
+  return normalizeGroup(payload?.group || null)
+}
+
+export async function joinGroup(groupId) {
+  const payload = await request(`/groups/${groupId}/join`, {
+    method: "POST"
+  })
+
+  return normalizeGroup(payload?.group || null)
+}
+
+export async function searchAll(query) {
+  const params = new URLSearchParams({ q: query })
+  const payload = await request(`/search?${params.toString()}`, { method: "GET" })
+
+  return {
+    query: payload?.query || query,
+    users: (payload?.users || []).map(normalizeUser),
+    posts: payload?.posts || [],
+    groups: (payload?.groups || []).map(normalizeGroup)
   }
 }
 

@@ -11,6 +11,7 @@ import NotificationsView from "../views/NotificationsView.vue"
 import ProfileView from "../views/ProfileView.vue"
 import RegisterView from "../views/RegisterView.vue"
 import ResetPasswordView from "../views/ResetPasswordView.vue"
+import SearchView from "../views/SearchView.vue"
 
 const routes = [
   { path: "/", redirect: "/feed" },
@@ -18,7 +19,8 @@ const routes = [
   { path: "/create", name: "create-post", component: CreatePostView },
   { path: "/profile/:handle?", name: "profile", component: ProfileView, props: true },
   { path: "/my-posts", name: "my-posts", component: MyPostsView },
-  { path: "/groups", name: "groups", component: GroupsView },
+  { path: "/groups/:groupId?", name: "groups", component: GroupsView, props: true },
+  { path: "/search", name: "search", component: SearchView },
   { path: "/notifications", name: "notifications", component: NotificationsView },
   { path: "/chat", name: "chat", component: ChatView },
   { path: "/login", name: "login", component: LoginView },

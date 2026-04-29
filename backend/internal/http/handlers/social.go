@@ -19,7 +19,13 @@ type socialService interface {
 	DeletePost(ctx context.Context, author auth.User, postID string) error
 	Feed(ctx context.Context, viewerID string) ([]social.Post, error)
 	MyPosts(ctx context.Context, userID string) ([]social.Post, error)
+	PostByID(ctx context.Context, viewerID, postID string) (social.Post, error)
 	ProfileByHandle(ctx context.Context, viewerID, handle string) (social.PublicProfilePage, error)
+	Groups(ctx context.Context, viewerID string) ([]social.Group, error)
+	CreateGroup(ctx context.Context, creator auth.User, input social.CreateGroupInput) (social.Group, error)
+	GroupByID(ctx context.Context, viewerID, groupID string) (social.Group, error)
+	JoinGroup(ctx context.Context, userID, groupID string) (social.Group, error)
+	Search(ctx context.Context, viewerID, query string) (social.GlobalSearchResult, error)
 	Conversations(ctx context.Context, userID string) ([]social.ConversationSummary, error)
 	Conversation(ctx context.Context, viewerID, partnerID string) (social.ConversationThread, error)
 	SendPrivateMessage(ctx context.Context, sender auth.User, partnerID string, input social.SendPrivateMessageInput) (social.PrivateMessage, error)

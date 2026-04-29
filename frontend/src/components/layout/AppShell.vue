@@ -58,6 +58,7 @@ const route = useRoute()
 const requestError = ref("")
 const authError = ref("")
 const isLoggingOut = ref(false)
+const headerSearchQuery = ref("")
 const isAuthenticated = computed(() => Boolean(store.state.currentUser))
 const unreadNotifications = computed(() => store.state.notificationUnreadCount)
 const removeRealtimeListeners = []
@@ -86,6 +87,20 @@ const currentUserInitials = computed(() => {
 
 function isActive(item) {
   return route.path === item.to || route.path.startsWith(`${item.to}/`)
+}
+
+function routeSearchQuery() {
+  const rawValue = route.query.q
+  if (Array.isArray(rawValue)) {
+    return String(rawValue[0] || "").trim()
+  }
+
+  return typeof rawValue === "string" ? rawValue.trim() : ""
+}
+
+async function handleHeaderSearch() {
+  const query = headerSearchQuery.value.trim()
+  await router.push(query ? { path: "/search", query: { q: query } } : { path: "/search" })
 }
 
 async function refreshNotifications() {
@@ -180,6 +195,14 @@ watch(
     void refreshNotifications()
   }
 )
+
+watch(
+  () => [route.path, route.query.q],
+  () => {
+    headerSearchQuery.value = routeSearchQuery()
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
@@ -230,6 +253,21 @@ watch(
             class="shell__header-logo"
           />
         </div>
+
+        <form v-if="isAuthenticated" class="shell__search-form" @submit.prevent="handleHeaderSearch">
+          <label class="shell__search-field">
+            <span class="visually-hidden">Global search</span>
+            <input
+              v-model.trim="headerSearchQuery"
+              type="search"
+              maxlength="80"
+              placeholder="Search users, posts, and groups"
+            />
+          </label>
+          <button type="submit" class="button button--ghost button--small">
+            Search
+          </button>
+        </form>
 
         <div class="shell__header-actions">
           <template v-if="isAuthenticated">
