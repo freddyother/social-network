@@ -1,5 +1,5 @@
 <script setup>
-import { computed, reactive, ref, watch } from "vue"
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { useRouter } from "vue-router"
 
 import {
@@ -42,6 +42,8 @@ const groupPosts = ref([])
 const groupEvents = ref([])
 const inviteUsers = ref([])
 const groupJoinRequests = ref([])
+const activeSidebarSection = ref("")
+const previousBodyOverflow = ref("")
 const isLoading = ref(false)
 const isLoadingDetail = ref(false)
 const isLoadingGroupPosts = ref(false)
@@ -97,9 +99,97 @@ const activeGroupId = computed(() => String(props.groupId || "").trim())
 const joinedGroups = computed(() => groups.value.filter((group) => group.isMember))
 const discoverGroups = computed(() => groups.value.filter((group) => !group.isMember))
 const canManageJoinRequests = computed(() => selectedGroup.value?.role === "creator")
+const isSelectedGroupMember = computed(() => Boolean(selectedGroup.value?.isMember))
+const nextUpcomingGroupEvent = computed(() => groupEvents.value[0] || null)
+const isSidebarModalOpen = computed(() => Boolean(activeSidebarSection.value))
 const suggestedInviteUsers = computed(() =>
   inviteUsers.value.filter((user) => user.id !== currentUserId.value)
 )
+const sidebarCards = computed(() => {
+  const cards = []
+
+  if (selectedGroup.value) {
+    cards.push({
+      id: "about",
+      eyebrow: "Group",
+      title: selectedGroup.value.title,
+      meta: selectedGroup.value.isMember
+        ? `${selectedGroup.value.postsCount || 0} posts · ${selectedGroup.value.eventsCount || 0} events`
+        : selectedGroupAccessCopy(selectedGroup.value)
+    })
+  }
+
+  if (selectedGroup.value?.isMember) {
+    cards.push({
+      id: "create-post",
+      eyebrow: "Post",
+      title: "Create post",
+      meta: groupPosts.value.length
+        ? `${groupPosts.value.length} posts in this feed`
+        : "Start the first thread for this group"
+    })
+    cards.push({
+      id: "events",
+      eyebrow: "Events",
+      title: "Event board",
+      meta: nextUpcomingGroupEvent.value
+        ? formatDateTime(nextUpcomingGroupEvent.value.startsAt)
+        : "No events planned yet"
+    })
+    cards.push({
+      id: "create-event",
+      eyebrow: "Plan",
+      title: "Create event",
+      meta: "Schedule a meetup or working session"
+    })
+    cards.push({
+      id: "invite",
+      eyebrow: "Invite",
+      title: "Invite people",
+      meta: isLoadingInviteUsers.value
+        ? "Refreshing candidates..."
+        : `${suggestedInviteUsers.value.length} people available`
+    })
+  }
+
+  if (canManageJoinRequests.value) {
+    cards.push({
+      id: "requests",
+      eyebrow: "Requests",
+      title: "Join approvals",
+      meta: isLoadingGroupJoinRequests.value
+        ? "Refreshing requests..."
+        : `${groupJoinRequests.value.length} pending`
+    })
+  }
+
+  if (joinedGroups.value.length || !selectedGroup.value) {
+    cards.push({
+      id: "memberships",
+      eyebrow: "Memberships",
+      title: "Your groups",
+      meta: `${joinedGroups.value.length} joined`
+    })
+  }
+
+  if (discoverGroups.value.length || !selectedGroup.value) {
+    cards.push({
+      id: "discover",
+      eyebrow: "Discover",
+      title: "Explore groups",
+      meta: `${discoverGroups.value.length} available`
+    })
+  }
+
+  cards.push({
+    id: "create-group",
+    eyebrow: "Create",
+    title: "Start a group",
+    meta: `${groups.value.length} total groups`
+  })
+
+  return cards
+})
 
 function displayName(user) {
   if (!user) {
@@ -157,6 +247,24 @@ function groupCommentTimestampLabel(comment) {
 
 function commentCountLabel(count) {
   return Number(count || 0) === 1 ? "1 comment" : `${Number(count || 0)} comments`
+}
+
+function selectSidebarSection(sectionId) {
+  activeSidebarSection.value = sectionId
+}
+
+function closeSidebarModal() {
+  activeSidebarSection.value = ""
+}
+
+function handleWindowKeydown(event) {
+  if (!isSidebarModalOpen.value) {
+    return
+  }
+
+  if (event.key === "Escape") {
+    closeSidebarModal()
+  }
 }
 
 function sortGroups(items) {
@@ -635,6 +743,7 @@ async function handleCreateGroup() {
     createForm.description = ""
     upsertGroup(createdGroup)
     selectedGroup.value = createdGroup
+    activeSidebarSection.value = "about"
     await router.push({ name: "groups", params: { groupId: createdGroup.id } })
   } catch (error) {
     if (isApiError(error)) {
@@ -670,6 +779,7 @@ async function handleJoinGroup(groupId = selectedGroup.value?.id || "") {
     if (!selectedGroup.value || selectedGroup.value.id === normalizedGroupId) {
       selectedGroup.value = joinedGroup
     }
+    activeSidebarSection.value = "about"
   } catch (error) {
     requestError.value = error instanceof Error ? error.message : "Could not send the join request."
   } finally {
@@ -727,6 +837,7 @@ async function handleCreateGroupPost() {
     ensureGroupCommentState(createdPost.id)
     groupPostForm.body = ""
     bumpGroupPostsCount(normalizedGroupId, 1)
+    activeSidebarSection.value = "create-post"
   } catch (error) {
     if (isApiError(error)) {
       createGroupPostError.value =
@@ -801,6 +912,7 @@ async function handleCreateGroupEvent() {
     groupEventForm.description = ""
     groupEventForm.startsAtLocal = ""
     bumpGroupEventsCount(normalizedGroupId, 1)
+    activeSidebarSection.value = "events"
   } catch (error) {
     if (isApiError(error)) {
       createGroupEventError.value =
@@ -859,6 +971,7 @@ async function handleInviteUserToGroup() {
     inviteForm.note = ""
     inviteSuccess.value = `Invitation sent to ${recipientName}.`
     await loadInviteUsers()
+    activeSidebarSection.value = "invite"
   } catch (error) {
     if (isApiError(error)) {
       inviteError.value =
@@ -940,18 +1053,53 @@ watch(
   },
   { immediate: true }
 )
+
+watch(
+  () => sidebarCards.value.map((card) => card.id).join("|"),
+  (value) => {
+    const availableIds = value ? value.split("|").filter(Boolean) : []
+    if (!availableIds.length || !availableIds.includes(activeSidebarSection.value)) {
+      activeSidebarSection.value = ""
+    }
+  },
+  { immediate: true }
+)
+
+onMounted(() => {
+  if (typeof window !== "undefined") {
+    window.addEventListener("keydown", handleWindowKeydown)
+  }
+})
+
+onBeforeUnmount(() => {
+  if (typeof window !== "undefined") {
+    window.removeEventListener("keydown", handleWindowKeydown)
+  }
+
+  if (typeof document !== "undefined") {
+    document.body.style.overflow = previousBodyOverflow.value
+  }
+})
+
+watch(
+  () => isSidebarModalOpen.value,
+  (isOpen) => {
+    if (typeof document === "undefined") {
+      return
+    }
+
+    if (isOpen) {
+      previousBodyOverflow.value = document.body.style.overflow
+      document.body.style.overflow = "hidden"
+    } else {
+      document.body.style.overflow = previousBodyOverflow.value
+    }
+  }
+)
 </script>
 
 <template>
   <section class="page">
-    <div class="panel">
-      <p class="eyebrow">Groups</p>
-      <h2>Group spaces now support conversation, events, and invites</h2>
-      <p>
-        This phase adds flat comments on group posts, shared event planning with RSVPs, and invite-by-message flows that open straight into the group from chat.
-      </p>
-    </div>
-
     <div v-if="!isAuthenticated" class="panel panel--narrow">
       <h3>Login required</h3>
       <p>Sign in to create groups, join communities, comment on group posts, plan events, and invite people in.</p>
@@ -960,89 +1108,45 @@ watch(
     <template v-else>
       <p v-if="requestError" class="form-error">{{ requestError }}</p>
 
-      <div class="grid grid--two groups-layout">
-        <section class="panel">
-          <div class="feed-header">
-            <div>
-              <p class="eyebrow">Create</p>
-              <h3>Start a new group</h3>
+      <div class="feed-layout groups-feed-layout">
+        <section class="page groups-main-feed">
+          <div class="feed-header groups-main-feed__header">
+            <div class="groups-main-feed__summary">
+              <p class="eyebrow">{{ selectedGroup ? "Group feed" : "Groups" }}</p>
+              <h3>{{ selectedGroup ? selectedGroup.title : "Pick a group" }}</h3>
+              <p class="feed-note">
+                {{
+                  selectedGroup
+                    ? selectedGroup.isMember
+                      ? "Only the internal timeline lives in this main column. Group tools stay on the right."
+                      : selectedGroupAccessCopy(selectedGroup)
+                    : isLoading
+                      ? "Loading your groups and discovery spaces..."
+                      : "Open one of your groups from the right rail to focus this feed."
+                }}
+              </p>
             </div>
-            <p>{{ groups.length }} total groups</p>
-          </div>
 
-          <form class="stack-form" @submit.prevent="handleCreateGroup">
-            <label>
-              <span>Group title</span>
-              <input
-                v-model.trim="createForm.title"
-                type="text"
-                maxlength="120"
-                placeholder="Product builders in London"
-              />
-            </label>
-
-            <label>
-              <span>Description</span>
-              <textarea
-                v-model.trim="createForm.description"
-                rows="5"
-                maxlength="2000"
-                placeholder="Say what this community is for, who should join, and what people can expect here."
-              ></textarea>
-            </label>
-
-            <div class="profile-form__actions">
-              <p class="feed-note">Groups stay open to join in this MVP so we can ship the community core quickly.</p>
-              <button type="submit" class="button" :disabled="isCreatingGroup">
-                {{ isCreatingGroup ? "Creating..." : "Create group" }}
+            <div v-if="selectedGroup" class="groups-main-feed__actions">
+              <span class="badge badge--neutral">{{ selectedGroup.postsCount || 0 }} posts</span>
+              <span v-if="selectedGroup.isMember" class="badge badge--soft">{{ selectedGroup.role || "member" }}</span>
+              <span v-else-if="selectedGroup.joinRequestStatus === 'pending'" class="badge badge--neutral">pending</span>
+              <button type="button" class="button button--ghost button--small" @click="selectSidebarSection('about')">
+                About group
               </button>
             </div>
+          </div>
 
-            <p v-if="createError" class="form-error">{{ createError }}</p>
-          </form>
-        </section>
+          <div v-if="!selectedGroup" class="panel profile-empty-state">
+            <h3>No group selected yet</h3>
+            <p>{{ isLoading ? "Loading the latest groups..." : "Choose one from the right side to load its feed here." }}</p>
+          </div>
 
-        <section class="panel">
-          <template v-if="selectedGroup">
-            <p class="eyebrow">Selected Group</p>
-
-            <div class="groups-detail__hero">
-              <span class="user-avatar user-avatar--small">
-                <img
-                  v-if="selectedGroup.creator?.avatarUrl"
-                  :src="selectedGroup.creator.avatarUrl"
-                  :alt="`${displayName(selectedGroup.creator)} avatar`"
-                  class="user-avatar__image"
-                />
-                <span v-else class="user-avatar__fallback">{{ userInitials(selectedGroup.creator) }}</span>
-              </span>
-
-              <div class="groups-detail__copy">
-                <h3>{{ selectedGroup.title }}</h3>
-                <p>{{ selectedGroup.description }}</p>
-                <p class="feed-note">
-                  Created by {{ displayName(selectedGroup.creator) }} · {{ formatRelativeTime(selectedGroup.createdAt) }}
-                </p>
-              </div>
-            </div>
-
-            <div class="group-card__stats">
-              <span class="badge badge--neutral">{{ selectedGroup.membersCount }} members</span>
-              <span class="badge badge--neutral">{{ selectedGroup.postsCount }} posts</span>
-              <span class="badge badge--neutral">{{ selectedGroup.eventsCount }} events</span>
-              <span v-if="selectedGroup.pendingRequestsCount" class="badge badge--neutral">
-                {{ selectedGroup.pendingRequestsCount }} pending
-              </span>
-              <span v-if="selectedGroup.isMember" class="badge">{{ selectedGroup.role || "member" }}</span>
-              <span v-else-if="selectedGroup.joinRequestStatus === 'pending'" class="badge badge--neutral">pending</span>
-            </div>
-
-            <div class="profile-form__actions">
-              <p class="feed-note">
-                {{ selectedGroupAccessCopy(selectedGroup) }}
-              </p>
+          <div v-else-if="!isSelectedGroupMember" class="panel profile-empty-state group-posts-locked">
+            <h3>Join to unlock the feed</h3>
+            <p>This main column only shows the internal posts once you are inside the group.</p>
+            <div class="group-side-sheet__actions">
               <button
-                v-if="!selectedGroup.isMember"
                 type="button"
                 class="button"
                 :disabled="joinLoading[selectedGroup.id] || selectedGroup.joinRequestStatus === 'pending'"
@@ -1050,144 +1154,50 @@ watch(
               >
                 {{ joinButtonLabel(selectedGroup) }}
               </button>
-            </div>
-
-            <p v-if="isLoadingDetail" class="feed-note">Refreshing group details...</p>
-          </template>
-
-          <div v-else class="profile-empty-state">
-            <h3>No group selected yet</h3>
-            <p>{{ isLoading ? "Loading the latest groups..." : "Create the first group or open one from the lists below." }}</p>
-          </div>
-        </section>
-      </div>
-
-      <section v-if="selectedGroup && canManageJoinRequests" class="panel">
-        <div class="feed-header">
-          <div>
-            <p class="eyebrow">Requests</p>
-            <h3>Pending join requests</h3>
-          </div>
-          <p>{{ isLoadingGroupJoinRequests ? "Refreshing..." : `${groupJoinRequests.length} pending` }}</p>
-        </div>
-
-        <p v-if="groupJoinRequestsError" class="form-error">{{ groupJoinRequestsError }}</p>
-        <p v-else-if="isLoadingGroupJoinRequests" class="feed-note">Loading join requests...</p>
-
-        <div v-else-if="groupJoinRequests.length" class="user-stack">
-          <article
-            v-for="joinRequest in groupJoinRequests"
-            :key="joinRequest.id"
-            class="user-card group-join-request-card"
-          >
-            <div class="group-invite-suggestions__identity">
-              <span class="user-avatar user-avatar--small">
-                <img
-                  v-if="joinRequest.requester?.avatarUrl"
-                  :src="joinRequest.requester.avatarUrl"
-                  :alt="`${displayName(joinRequest.requester)} avatar`"
-                  class="user-avatar__image"
-                />
-                <span v-else class="user-avatar__fallback">{{ userInitials(joinRequest.requester) }}</span>
-              </span>
-
-              <div>
-                <strong>{{ displayName(joinRequest.requester) }}</strong>
-                <p class="feed-note">Requested {{ formatRelativeTime(joinRequest.createdAt) }}</p>
-              </div>
-            </div>
-
-            <div class="user-card__actions">
-              <button
-                type="button"
-                class="button button--ghost button--small"
-                :disabled="groupJoinRequestActionLoading[joinRequest.id]"
-                @click="handleRespondToGroupJoinRequest(joinRequest, false)"
-              >
-                {{ groupJoinRequestActionLoading[joinRequest.id] ? "Saving..." : "Decline" }}
-              </button>
-              <button
-                type="button"
-                class="button button--small"
-                :disabled="groupJoinRequestActionLoading[joinRequest.id]"
-                @click="handleRespondToGroupJoinRequest(joinRequest, true)"
-              >
-                {{ groupJoinRequestActionLoading[joinRequest.id] ? "Saving..." : "Accept" }}
+              <button type="button" class="button button--ghost button--small" @click="selectSidebarSection('about')">
+                View group info
               </button>
             </div>
-          </article>
-        </div>
-
-        <div v-else class="profile-empty-state">
-          <h3>No pending requests</h3>
-          <p>New requests to join this group will appear here for approval.</p>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="feed-header">
-          <div>
-            <p class="eyebrow">Discussion</p>
-            <h3>{{ selectedGroup ? `Inside ${selectedGroup.title}` : "Group timeline" }}</h3>
           </div>
-          <p v-if="selectedGroup">{{ selectedGroup.postsCount || 0 }} posts</p>
-        </div>
 
-        <div v-if="!selectedGroup" class="profile-empty-state">
-          <h3>Pick a group first</h3>
-          <p>Open one of your groups or a discovery result to load its internal timeline.</p>
-        </div>
+          <div v-else-if="isLoadingGroupPosts" class="panel profile-empty-state">
+            <h3>Loading group posts...</h3>
+            <p>Pulling the latest discussion into the feed.</p>
+          </div>
 
-        <template v-else-if="selectedGroup.isMember">
-          <form class="stack-form group-post-composer" @submit.prevent="handleCreateGroupPost">
-            <label>
-              <span>Start a conversation</span>
-              <textarea
-                v-model.trim="groupPostForm.body"
-                rows="4"
-                maxlength="4000"
-                placeholder="Share an update, ask for feedback, or kick off the next thread for this group."
-              ></textarea>
-            </label>
-
-            <div class="profile-form__actions">
-              <p class="feed-note">Only members can read and publish inside this internal timeline.</p>
-              <button type="submit" class="button" :disabled="isCreatingGroupPost">
-                {{ isCreatingGroupPost ? "Publishing..." : "Publish in group" }}
-              </button>
-            </div>
-
-            <p v-if="createGroupPostError" class="form-error">{{ createGroupPostError }}</p>
-          </form>
-
-          <p v-if="isLoadingGroupPosts" class="feed-note">Loading group posts...</p>
           <p v-else-if="groupPostsError" class="form-error">{{ groupPostsError }}</p>
 
-          <div v-else-if="groupPosts.length" class="group-post-stack">
-            <article v-for="post in groupPosts" :key="post.id" class="post-card group-post-card">
-              <div class="post-card__header">
+          <div v-else-if="groupPosts.length" class="groups-main-feed__stack">
+            <article v-for="post in groupPosts" :key="post.id" class="panel post-card">
+              <header class="post-card__header">
                 <div class="post-card__header-main">
-                  <span class="user-avatar user-avatar--small">
-                    <img
-                      v-if="post.author?.avatarUrl"
-                      :src="post.author.avatarUrl"
-                      :alt="`${displayName(post.author)} avatar`"
-                      class="user-avatar__image"
-                    />
-                    <span v-else class="user-avatar__fallback">{{ userInitials(post.author) }}</span>
-                  </span>
+                  <div class="groups-main-feed__author">
+                    <span class="user-avatar user-avatar--small">
+                      <img
+                        v-if="post.author?.avatarUrl"
+                        :src="post.author.avatarUrl"
+                        :alt="`${displayName(post.author)} avatar`"
+                        class="user-avatar__image"
+                      />
+                      <span v-else class="user-avatar__fallback">{{ userInitials(post.author) }}</span>
+                    </span>
 
-                  <div>
-                    <strong>{{ displayName(post.author) }}</strong>
-                    <div class="post-card__meta">
-                      <span>{{ commentCountLabel(post.commentsCount) }}</span>
-                      <span>{{ groupPostTimestampLabel(post) }}</span>
+                    <div>
+                      <p class="eyebrow">Group post</p>
+                      <h3>{{ displayName(post.author) }}</h3>
+                      <p class="post-card__meta">
+                        <span>{{ groupPostTimestampLabel(post) }}</span>
+                        <span class="badge badge--neutral">{{ commentCountLabel(post.commentsCount) }}</span>
+                      </p>
                     </div>
                   </div>
                 </div>
 
-                <span v-if="post.author?.id === currentUserId" class="badge">you</span>
-              </div>
+                <div class="post-card__timestamps">
+                  <span class="badge badge--soft">{{ selectedGroup.title }}</span>
+                  <span v-if="post.author?.id === currentUserId">You</span>
+                </div>
+              </header>
 
               <div class="post-card__body">
                 <p>{{ post.body }}</p>
@@ -1241,7 +1251,7 @@ watch(
                   </label>
 
                   <div class="comment-composer__actions">
-                    <p class="feed-note">Comments here are flat in this MVP to keep group discussion lightweight.</p>
+                    <p class="feed-note">Comments stay flat in this MVP so the feed remains lightweight.</p>
                     <button type="submit" class="button button--small" :disabled="groupCommentSubmitting[post.id]">
                       {{ groupCommentSubmitting[post.id] ? "Posting..." : "Post comment" }}
                     </button>
@@ -1251,306 +1261,580 @@ watch(
             </article>
           </div>
 
-          <div v-else class="profile-empty-state group-posts-empty">
+          <div v-else class="panel profile-empty-state group-posts-empty">
             <h3>No posts yet</h3>
-            <p>Be the first person to start the conversation inside this group.</p>
-          </div>
-        </template>
-
-        <div v-else class="profile-empty-state group-posts-locked">
-          <h3>Join to see the conversation</h3>
-          <p>This group's internal timeline is only visible to members in this phase.</p>
-          <button
-            type="button"
-            class="button"
-            :disabled="joinLoading[selectedGroup.id] || selectedGroup.joinRequestStatus === 'pending'"
-            @click="handleJoinGroup(selectedGroup.id)"
-          >
-            {{ joinButtonLabel(selectedGroup) }}
-          </button>
-        </div>
-      </section>
-
-      <div class="grid grid--two">
-        <section class="panel">
-          <div class="feed-header">
-            <div>
-              <p class="eyebrow">Events</p>
-              <h3>{{ selectedGroup ? `${selectedGroup.title} calendar` : "Group events" }}</h3>
-            </div>
-            <p v-if="selectedGroup">{{ selectedGroup.eventsCount || 0 }} events</p>
-          </div>
-
-          <div v-if="!selectedGroup" class="profile-empty-state">
-            <h3>Select a group</h3>
-            <p>Pick a group to plan events with its members.</p>
-          </div>
-
-          <template v-else-if="selectedGroup.isMember">
-            <form class="stack-form group-event-form" @submit.prevent="handleCreateGroupEvent">
-              <label>
-                <span>Event title</span>
-                <input
-                  v-model.trim="groupEventForm.title"
-                  type="text"
-                  maxlength="160"
-                  placeholder="Friday working session"
-                />
-              </label>
-
-              <label>
-                <span>Description</span>
-                <textarea
-                  v-model.trim="groupEventForm.description"
-                  rows="4"
-                  maxlength="2000"
-                  placeholder="Share the agenda, location, and the outcome everyone should expect."
-                ></textarea>
-              </label>
-
-              <label>
-                <span>Starts at</span>
-                <input
-                  v-model="groupEventForm.startsAtLocal"
-                  type="datetime-local"
-                />
-              </label>
-
-              <div class="profile-form__actions">
-                <p class="feed-note">Members can create lightweight events and RSVP inside the group.</p>
-                <button type="submit" class="button" :disabled="isCreatingGroupEvent">
-                  {{ isCreatingGroupEvent ? "Creating..." : "Create event" }}
-                </button>
-              </div>
-
-              <p v-if="createGroupEventError" class="form-error">{{ createGroupEventError }}</p>
-            </form>
-
-            <p v-if="isLoadingGroupEvents" class="feed-note">Loading group events...</p>
-            <p v-else-if="groupEventsError" class="form-error">{{ groupEventsError }}</p>
-
-            <div v-else-if="groupEvents.length" class="group-event-stack">
-              <article v-for="event in groupEvents" :key="event.id" class="group-event-card">
-                <div class="group-event-card__header">
-                  <div>
-                    <h4>{{ event.title }}</h4>
-                    <p class="feed-note">{{ formatDateTime(event.startsAt) }}</p>
-                  </div>
-                  <span v-if="event.viewerResponse" class="badge">{{ event.viewerResponse }}</span>
-                </div>
-
-                <p class="group-event-card__body">{{ event.description }}</p>
-
-                <div class="group-card__stats">
-                  <span class="badge badge--neutral">{{ event.goingCount }} going</span>
-                  <span class="badge badge--neutral">{{ event.notGoingCount }} not going</span>
-                  <span class="badge badge--neutral">By {{ displayName(event.creator) }}</span>
-                </div>
-
-                <div class="group-event-card__actions">
-                  <button
-                    type="button"
-                    :class="['button', 'button--small', event.viewerResponse === 'going' ? null : 'button--ghost']"
-                    :disabled="eventResponseLoading[event.id]"
-                    @click="handleRespondToGroupEvent(event, 'going')"
-                  >
-                    {{ eventResponseLoading[event.id] && event.viewerResponse !== 'going' ? "Saving..." : "Going" }}
-                  </button>
-                  <button
-                    type="button"
-                    :class="['button', 'button--small', event.viewerResponse === 'not_going' ? null : 'button--ghost']"
-                    :disabled="eventResponseLoading[event.id]"
-                    @click="handleRespondToGroupEvent(event, 'not_going')"
-                  >
-                    {{ eventResponseLoading[event.id] && event.viewerResponse !== 'not_going' ? "Saving..." : "Not going" }}
-                  </button>
-                </div>
-              </article>
-            </div>
-
-            <div v-else class="profile-empty-state">
-              <h3>No events yet</h3>
-              <p>Create the first meetup, call, or working session for this group.</p>
-            </div>
-          </template>
-
-          <div v-else class="profile-empty-state">
-            <h3>Join to plan events</h3>
-            <p>Event planning stays inside the membership area in this phase.</p>
+            <p>Use the right rail to create the first post and start the conversation.</p>
           </div>
         </section>
 
-        <section class="panel">
-          <div class="feed-header">
-            <div>
-              <p class="eyebrow">Invites</p>
-              <h3>Invite people by private message</h3>
-            </div>
-            <p>{{ isLoadingInviteUsers ? "Refreshing..." : `${suggestedInviteUsers.length} people` }}</p>
-          </div>
-
-          <div v-if="!selectedGroup" class="profile-empty-state">
-            <h3>Select a group</h3>
-            <p>Open a group to invite someone into it through private chat.</p>
-          </div>
-
-          <template v-else-if="selectedGroup.isMember">
-            <form class="stack-form" @submit.prevent="handleInviteUserToGroup">
-              <label>
-                <span>Recipient</span>
-                <select v-model="inviteForm.recipientId">
-                  <option value="">Choose a person</option>
-                  <option v-for="user in suggestedInviteUsers" :key="user.id" :value="user.id">
-                    {{ displayName(user) }}
-                  </option>
-                </select>
-              </label>
-
-              <label>
-                <span>Optional note</span>
-                <textarea
-                  v-model.trim="inviteForm.note"
-                  rows="4"
-                  maxlength="500"
-                  placeholder="Tell them why this group is relevant and what they should expect when they join."
-                ></textarea>
-              </label>
-
-              <div class="profile-form__actions">
-                <p class="feed-note">The invitation lands as a private message and opens into an actionable group card in chat.</p>
-                <button type="submit" class="button" :disabled="isSendingInvite || isLoadingInviteUsers">
-                  {{ isSendingInvite ? "Sending..." : "Send invite" }}
-                </button>
+        <aside class="feed-side groups-feed-side">
+          <section class="panel">
+            <div class="feed-header">
+              <div>
+                <p class="eyebrow">Workspace</p>
+                <h3>{{ selectedGroup ? "Group controls" : "Group navigation" }}</h3>
               </div>
+              <p>{{ sidebarCards.length }} sections</p>
+            </div>
 
-              <p v-if="inviteError" class="form-error">{{ inviteError }}</p>
-              <p v-else-if="inviteUsersError" class="form-error">{{ inviteUsersError }}</p>
-              <p v-else-if="inviteSuccess" class="form-hint form-hint--success">{{ inviteSuccess }}</p>
-            </form>
-
-            <div v-if="suggestedInviteUsers.length" class="user-stack group-invite-suggestions">
-              <article
-                v-for="user in suggestedInviteUsers.slice(0, 4)"
-                :key="user.id"
-                class="user-card"
+            <div class="groups-side-actions">
+              <button
+                v-for="card in sidebarCards"
+                :key="card.id"
+                type="button"
+                class="group-side-launcher"
+                :class="{ 'group-side-launcher--active': activeSidebarSection === card.id }"
+                @click="selectSidebarSection(card.id)"
               >
-                <div class="group-invite-suggestions__identity">
-                  <span class="user-avatar user-avatar--small">
-                    <img
-                      v-if="user.avatarUrl"
-                      :src="user.avatarUrl"
-                      :alt="`${displayName(user)} avatar`"
-                      class="user-avatar__image"
-                    />
-                    <span v-else class="user-avatar__fallback">{{ userInitials(user) }}</span>
-                  </span>
-
-                  <div>
-                    <strong>{{ displayName(user) }}</strong>
-                    <p class="feed-note">{{ user.aboutMe || "Open a direct conversation through a group invite." }}</p>
-                  </div>
+                <p class="eyebrow">{{ card.eyebrow }}</p>
+                <div class="group-side-launcher__title">
+                  <strong>{{ card.title }}</strong>
                 </div>
-
-                <button type="button" class="button button--ghost button--small" @click="inviteForm.recipientId = user.id">
-                  Select
-                </button>
-              </article>
+                <p class="group-side-launcher__meta">{{ card.meta }}</p>
+              </button>
             </div>
+          </section>
 
-            <p v-else-if="!isLoadingInviteUsers" class="feed-note">No invite suggestions available right now, but the form will work again once discover users reloads.</p>
-          </template>
-
-          <div v-else class="profile-empty-state">
-            <h3>Join to invite people</h3>
-            <p>You need to be part of the group before inviting others into it.</p>
-          </div>
-        </section>
+          <p class="feed-note groups-feed-side__hint">Tap a card to open the full workspace in a modal.</p>
+        </aside>
       </div>
 
-      <div class="grid grid--two">
-        <section class="panel">
-          <div class="feed-header">
-            <div>
-              <p class="eyebrow">Memberships</p>
-              <h3>Your groups</h3>
-            </div>
-            <p>{{ joinedGroups.length }} joined</p>
-          </div>
+      <div
+        v-if="isSidebarModalOpen"
+        class="group-modal"
+        role="dialog"
+        aria-modal="true"
+        @click.self="closeSidebarModal"
+      >
+        <div class="group-modal__dialog">
+          <section class="panel panel--inset group-side-sheet group-modal__sheet">
+            <header class="group-modal__topbar">
+              <p class="feed-note">Group workspace</p>
+              <button type="button" class="button button--ghost button--small" @click="closeSidebarModal">
+                Close
+              </button>
+            </header>
 
-          <p v-if="isLoading" class="feed-note">Loading groups...</p>
+            <template v-if="activeSidebarSection === 'about'">
+              <div class="group-side-sheet__header">
+                <div>
+                  <p class="eyebrow">Group</p>
+                  <h3>{{ selectedGroup ? selectedGroup.title : "Group details" }}</h3>
+                </div>
+                <p v-if="selectedGroup">{{ isLoadingDetail ? "Refreshing..." : "Overview" }}</p>
+              </div>
 
-          <div v-else-if="joinedGroups.length" class="user-stack">
-            <article
-              v-for="group in joinedGroups"
-              :key="group.id"
-              class="user-card group-card"
-              :class="{ 'group-card--active': selectedGroup?.id === group.id }"
-            >
-              <div class="group-card__body">
-                <strong>{{ group.title }}</strong>
-                <p class="group-card__summary">{{ group.description }}</p>
+              <template v-if="selectedGroup">
+                <div class="groups-detail__hero">
+                  <span class="user-avatar user-avatar--small">
+                    <img
+                      v-if="selectedGroup.creator?.avatarUrl"
+                      :src="selectedGroup.creator.avatarUrl"
+                      :alt="`${displayName(selectedGroup.creator)} avatar`"
+                      class="user-avatar__image"
+                    />
+                    <span v-else class="user-avatar__fallback">{{ userInitials(selectedGroup.creator) }}</span>
+                  </span>
+
+                  <div class="groups-detail__copy">
+                    <h3>{{ selectedGroup.title }}</h3>
+                    <p>{{ selectedGroup.description }}</p>
+                    <p class="feed-note">
+                      Created by {{ displayName(selectedGroup.creator) }} · {{ formatRelativeTime(selectedGroup.createdAt) }}
+                    </p>
+                  </div>
+                </div>
+
                 <div class="group-card__stats">
-                  <span class="badge badge--neutral">{{ group.membersCount }} members</span>
-                  <span class="badge badge--neutral">{{ group.postsCount }} posts</span>
-                  <span class="badge badge--neutral">{{ group.eventsCount }} events</span>
-                  <span v-if="group.pendingRequestsCount" class="badge badge--neutral">{{ group.pendingRequestsCount }} pending</span>
-                  <span class="badge">{{ group.role || "member" }}</span>
+                  <span class="badge badge--neutral">{{ selectedGroup.membersCount }} members</span>
+                  <span class="badge badge--neutral">{{ selectedGroup.postsCount }} posts</span>
+                  <span class="badge badge--neutral">{{ selectedGroup.eventsCount }} events</span>
+                  <span v-if="selectedGroup.pendingRequestsCount" class="badge badge--neutral">
+                    {{ selectedGroup.pendingRequestsCount }} pending
+                  </span>
+                  <span v-if="selectedGroup.isMember" class="badge">{{ selectedGroup.role || "member" }}</span>
+                  <span v-else-if="selectedGroup.joinRequestStatus === 'pending'" class="badge badge--neutral">pending</span>
+                </div>
+
+                <p class="feed-note">{{ selectedGroupAccessCopy(selectedGroup) }}</p>
+
+                <div class="group-side-sheet__actions">
+                  <button
+                    v-if="!selectedGroup.isMember"
+                    type="button"
+                    class="button"
+                    :disabled="joinLoading[selectedGroup.id] || selectedGroup.joinRequestStatus === 'pending'"
+                    @click="handleJoinGroup(selectedGroup.id)"
+                  >
+                    {{ joinButtonLabel(selectedGroup) }}
+                  </button>
+                  <button
+                    v-else
+                    type="button"
+                    class="button button--ghost button--small"
+                    @click="selectSidebarSection('create-post')"
+                  >
+                    Create post
+                  </button>
+                  <button
+                    v-if="selectedGroup.isMember"
+                    type="button"
+                    class="button button--ghost button--small"
+                    @click="selectSidebarSection('events')"
+                  >
+                    View events
+                  </button>
+                </div>
+              </template>
+
+              <div v-else class="profile-empty-state">
+                <h3>No group open</h3>
+                <p>Select a membership or discovery result to load the group details here.</p>
+              </div>
+            </template>
+
+            <template v-else-if="activeSidebarSection === 'create-post'">
+              <div class="group-side-sheet__header">
+                <div>
+                  <p class="eyebrow">Post</p>
+                  <h3>Create a group post</h3>
+                </div>
+                <p>{{ selectedGroup ? selectedGroup.title : "" }}</p>
+              </div>
+
+              <div v-if="!selectedGroup || !selectedGroup.isMember" class="profile-empty-state">
+                <h3>Join to publish</h3>
+                <p>The post composer appears here once you are part of the selected group.</p>
+              </div>
+
+              <form v-else class="stack-form" @submit.prevent="handleCreateGroupPost">
+                <label>
+                  <span>Start a conversation</span>
+                  <textarea
+                    v-model.trim="groupPostForm.body"
+                    rows="5"
+                    maxlength="4000"
+                    placeholder="Share an update, ask for feedback, or kick off the next thread for this group."
+                  ></textarea>
+                </label>
+
+                <div class="profile-form__actions">
+                  <p class="feed-note">Only members can read and publish inside this internal timeline.</p>
+                  <button type="submit" class="button" :disabled="isCreatingGroupPost">
+                    {{ isCreatingGroupPost ? "Publishing..." : "Publish in group" }}
+                  </button>
+                </div>
+
+                <p v-if="createGroupPostError" class="form-error">{{ createGroupPostError }}</p>
+              </form>
+            </template>
+
+            <template v-else-if="activeSidebarSection === 'events'">
+              <div class="group-side-sheet__header">
+                <div>
+                  <p class="eyebrow">Events</p>
+                  <h3>{{ selectedGroup ? `${selectedGroup.title} calendar` : "Group events" }}</h3>
+                </div>
+                <div class="group-side-sheet__actions">
+                  <button
+                    v-if="selectedGroup?.isMember"
+                    type="button"
+                    class="button button--ghost button--small"
+                    @click="selectSidebarSection('create-event')"
+                  >
+                    Create event
+                  </button>
                 </div>
               </div>
 
-              <div class="user-card__actions">
-                <button type="button" class="button button--ghost button--small" @click="openGroup(group.id)">
-                  Open group
-                </button>
-              </div>
-            </article>
-          </div>
-
-          <p v-else class="feed-note">You have not joined any groups yet. Create one or pick one from discovery.</p>
-        </section>
-
-        <section class="panel">
-          <div class="feed-header">
-            <div>
-              <p class="eyebrow">Discover</p>
-              <h3>Explore groups</h3>
-            </div>
-            <p>{{ discoverGroups.length }} available</p>
-          </div>
-
-          <p v-if="isLoading" class="feed-note">Loading groups...</p>
-
-          <div v-else-if="discoverGroups.length" class="user-stack">
-            <article
-              v-for="group in discoverGroups"
-              :key="group.id"
-              class="user-card group-card"
-              :class="{ 'group-card--active': selectedGroup?.id === group.id }"
-            >
-              <div class="group-card__body">
-                <strong>{{ group.title }}</strong>
-                <p class="group-card__summary">{{ group.description }}</p>
-                <p class="feed-note">{{ groupSummary(group) }}</p>
+              <div v-if="!selectedGroup" class="profile-empty-state">
+                <h3>Select a group</h3>
+                <p>Pick a group to see its upcoming events.</p>
               </div>
 
-              <div class="user-card__actions">
-                <button type="button" class="button button--ghost button--small" @click="openGroup(group.id)">
-                  Open
-                </button>
-                <button
-                  type="button"
-                  class="button button--small"
-                  :disabled="joinLoading[group.id] || group.joinRequestStatus === 'pending'"
-                  @click="handleJoinGroup(group.id)"
+              <div v-else-if="!selectedGroup.isMember" class="profile-empty-state">
+                <h3>Join to plan events</h3>
+                <p>Event planning stays inside the membership area in this phase.</p>
+              </div>
+
+              <template v-else>
+                <p v-if="isLoadingGroupEvents" class="feed-note">Loading group events...</p>
+                <p v-else-if="groupEventsError" class="form-error">{{ groupEventsError }}</p>
+
+                <div v-else-if="groupEvents.length" class="group-event-stack">
+                  <article v-for="event in groupEvents" :key="event.id" class="group-event-card">
+                    <div class="group-event-card__header">
+                      <div>
+                        <h4>{{ event.title }}</h4>
+                        <p class="feed-note">{{ formatDateTime(event.startsAt) }}</p>
+                      </div>
+                      <span v-if="event.viewerResponse" class="badge">{{ event.viewerResponse }}</span>
+                    </div>
+
+                    <p class="group-event-card__body">{{ event.description }}</p>
+
+                    <div class="group-card__stats">
+                      <span class="badge badge--neutral">{{ event.goingCount }} going</span>
+                      <span class="badge badge--neutral">{{ event.notGoingCount }} not going</span>
+                      <span class="badge badge--neutral">By {{ displayName(event.creator) }}</span>
+                    </div>
+
+                    <div class="group-event-card__actions">
+                      <button
+                        type="button"
+                        :class="['button', 'button--small', event.viewerResponse === 'going' ? null : 'button--ghost']"
+                        :disabled="eventResponseLoading[event.id]"
+                        @click="handleRespondToGroupEvent(event, 'going')"
+                      >
+                        {{ eventResponseLoading[event.id] && event.viewerResponse !== 'going' ? "Saving..." : "Going" }}
+                      </button>
+                      <button
+                        type="button"
+                        :class="['button', 'button--small', event.viewerResponse === 'not_going' ? null : 'button--ghost']"
+                        :disabled="eventResponseLoading[event.id]"
+                        @click="handleRespondToGroupEvent(event, 'not_going')"
+                      >
+                        {{ eventResponseLoading[event.id] && event.viewerResponse !== 'not_going' ? "Saving..." : "Not going" }}
+                      </button>
+                    </div>
+                  </article>
+                </div>
+
+                <div v-else class="profile-empty-state">
+                  <h3>No events yet</h3>
+                  <p>Create the first meetup, call, or working session for this group from the planner card.</p>
+                </div>
+              </template>
+            </template>
+
+            <template v-else-if="activeSidebarSection === 'create-event'">
+              <div class="group-side-sheet__header">
+                <div>
+                  <p class="eyebrow">Plan</p>
+                  <h3>Create an event</h3>
+                </div>
+                <p>{{ selectedGroup ? selectedGroup.title : "" }}</p>
+              </div>
+
+              <div v-if="!selectedGroup || !selectedGroup.isMember" class="profile-empty-state">
+                <h3>Join to create events</h3>
+                <p>The event planner appears here once you are a member of the selected group.</p>
+              </div>
+
+              <form v-else class="stack-form group-event-form" @submit.prevent="handleCreateGroupEvent">
+                <label>
+                  <span>Event title</span>
+                  <input
+                    v-model.trim="groupEventForm.title"
+                    type="text"
+                    maxlength="160"
+                    placeholder="Friday working session"
+                  />
+                </label>
+
+                <label>
+                  <span>Description</span>
+                  <textarea
+                    v-model.trim="groupEventForm.description"
+                    rows="4"
+                    maxlength="2000"
+                    placeholder="Share the agenda, location, and the outcome everyone should expect."
+                  ></textarea>
+                </label>
+
+                <label>
+                  <span>Starts at</span>
+                  <input
+                    v-model="groupEventForm.startsAtLocal"
+                    type="datetime-local"
+                  />
+                </label>
+
+                <div class="profile-form__actions">
+                  <p class="feed-note">Members can create lightweight events and RSVP inside the group.</p>
+                  <button type="submit" class="button" :disabled="isCreatingGroupEvent">
+                    {{ isCreatingGroupEvent ? "Creating..." : "Create event" }}
+                  </button>
+                </div>
+
+                <p v-if="createGroupEventError" class="form-error">{{ createGroupEventError }}</p>
+              </form>
+            </template>
+
+            <template v-else-if="activeSidebarSection === 'invite'">
+              <div class="group-side-sheet__header">
+                <div>
+                  <p class="eyebrow">Invites</p>
+                  <h3>Invite people by private message</h3>
+                </div>
+                <p>{{ isLoadingInviteUsers ? "Refreshing..." : `${suggestedInviteUsers.length} people` }}</p>
+              </div>
+
+              <div v-if="!selectedGroup" class="profile-empty-state">
+                <h3>Select a group</h3>
+                <p>Open a group to invite someone into it through private chat.</p>
+              </div>
+
+              <template v-else-if="selectedGroup.isMember">
+                <form class="stack-form" @submit.prevent="handleInviteUserToGroup">
+                  <label>
+                    <span>Recipient</span>
+                    <select v-model="inviteForm.recipientId">
+                      <option value="">Choose a person</option>
+                      <option v-for="user in suggestedInviteUsers" :key="user.id" :value="user.id">
+                        {{ displayName(user) }}
+                      </option>
+                    </select>
+                  </label>
+
+                  <label>
+                    <span>Optional note</span>
+                    <textarea
+                      v-model.trim="inviteForm.note"
+                      rows="4"
+                      maxlength="500"
+                      placeholder="Tell them why this group is relevant and what they should expect when they join."
+                    ></textarea>
+                  </label>
+
+                  <div class="profile-form__actions">
+                    <p class="feed-note">The invitation lands as a private message and opens into an actionable group card in chat.</p>
+                    <button type="submit" class="button" :disabled="isSendingInvite || isLoadingInviteUsers">
+                      {{ isSendingInvite ? "Sending..." : "Send invite" }}
+                    </button>
+                  </div>
+
+                  <p v-if="inviteError" class="form-error">{{ inviteError }}</p>
+                  <p v-else-if="inviteUsersError" class="form-error">{{ inviteUsersError }}</p>
+                  <p v-else-if="inviteSuccess" class="form-hint form-hint--success">{{ inviteSuccess }}</p>
+                </form>
+
+                <div v-if="suggestedInviteUsers.length" class="user-stack group-invite-suggestions">
+                  <article
+                    v-for="user in suggestedInviteUsers.slice(0, 4)"
+                    :key="user.id"
+                    class="user-card"
+                  >
+                    <div class="group-invite-suggestions__identity">
+                      <span class="user-avatar user-avatar--small">
+                        <img
+                          v-if="user.avatarUrl"
+                          :src="user.avatarUrl"
+                          :alt="`${displayName(user)} avatar`"
+                          class="user-avatar__image"
+                        />
+                        <span v-else class="user-avatar__fallback">{{ userInitials(user) }}</span>
+                      </span>
+
+                      <div>
+                        <strong>{{ displayName(user) }}</strong>
+                        <p class="feed-note">{{ user.aboutMe || "Open a direct conversation through a group invite." }}</p>
+                      </div>
+                    </div>
+
+                    <button type="button" class="button button--ghost button--small" @click="inviteForm.recipientId = user.id">
+                      Select
+                    </button>
+                  </article>
+                </div>
+
+                <p v-else-if="!isLoadingInviteUsers" class="feed-note">No invite suggestions available right now.</p>
+              </template>
+
+              <div v-else class="profile-empty-state">
+                <h3>Join to invite people</h3>
+                <p>You need to be part of the group before inviting others into it.</p>
+              </div>
+            </template>
+
+            <template v-else-if="activeSidebarSection === 'requests'">
+              <div class="group-side-sheet__header">
+                <div>
+                  <p class="eyebrow">Requests</p>
+                  <h3>Pending join requests</h3>
+                </div>
+                <p>{{ isLoadingGroupJoinRequests ? "Refreshing..." : `${groupJoinRequests.length} pending` }}</p>
+              </div>
+
+              <p v-if="groupJoinRequestsError" class="form-error">{{ groupJoinRequestsError }}</p>
+              <p v-else-if="isLoadingGroupJoinRequests" class="feed-note">Loading join requests...</p>
+
+              <div v-else-if="groupJoinRequests.length" class="user-stack">
+                <article
+                  v-for="joinRequest in groupJoinRequests"
+                  :key="joinRequest.id"
+                  class="user-card group-join-request-card"
                 >
-                  {{ joinButtonLabel(group) }}
-                </button>
-              </div>
-            </article>
-          </div>
+                  <div class="group-invite-suggestions__identity">
+                    <span class="user-avatar user-avatar--small">
+                      <img
+                        v-if="joinRequest.requester?.avatarUrl"
+                        :src="joinRequest.requester.avatarUrl"
+                        :alt="`${displayName(joinRequest.requester)} avatar`"
+                        class="user-avatar__image"
+                      />
+                      <span v-else class="user-avatar__fallback">{{ userInitials(joinRequest.requester) }}</span>
+                    </span>
 
-          <p v-else class="feed-note">Every existing group is already in your memberships. Create the next one to expand the map.</p>
-        </section>
+                    <div>
+                      <strong>{{ displayName(joinRequest.requester) }}</strong>
+                      <p class="feed-note">Requested {{ formatRelativeTime(joinRequest.createdAt) }}</p>
+                    </div>
+                  </div>
+
+                  <div class="user-card__actions">
+                    <button
+                      type="button"
+                      class="button button--ghost button--small"
+                      :disabled="groupJoinRequestActionLoading[joinRequest.id]"
+                      @click="handleRespondToGroupJoinRequest(joinRequest, false)"
+                    >
+                      {{ groupJoinRequestActionLoading[joinRequest.id] ? "Saving..." : "Decline" }}
+                    </button>
+                    <button
+                      type="button"
+                      class="button button--small"
+                      :disabled="groupJoinRequestActionLoading[joinRequest.id]"
+                      @click="handleRespondToGroupJoinRequest(joinRequest, true)"
+                    >
+                      {{ groupJoinRequestActionLoading[joinRequest.id] ? "Saving..." : "Accept" }}
+                    </button>
+                  </div>
+                </article>
+              </div>
+
+              <div v-else class="profile-empty-state">
+                <h3>No pending requests</h3>
+                <p>New requests to join this group will appear here for approval.</p>
+              </div>
+            </template>
+
+            <template v-else-if="activeSidebarSection === 'memberships'">
+              <div class="group-side-sheet__header">
+                <div>
+                  <p class="eyebrow">Memberships</p>
+                  <h3>Your groups</h3>
+                </div>
+                <p>{{ joinedGroups.length }} joined</p>
+              </div>
+
+              <p v-if="isLoading" class="feed-note">Loading groups...</p>
+
+              <div v-else-if="joinedGroups.length" class="user-stack">
+                <article
+                  v-for="group in joinedGroups"
+                  :key="group.id"
+                  class="user-card group-card"
+                  :class="{ 'group-card--active': selectedGroup?.id === group.id }"
+                >
+                  <div class="group-card__body">
+                    <strong>{{ group.title }}</strong>
+                    <p class="group-card__summary">{{ group.description }}</p>
+                    <div class="group-card__stats">
+                      <span class="badge badge--neutral">{{ group.membersCount }} members</span>
+                      <span class="badge badge--neutral">{{ group.postsCount }} posts</span>
+                      <span class="badge badge--neutral">{{ group.eventsCount }} events</span>
+                      <span v-if="group.pendingRequestsCount" class="badge badge--neutral">{{ group.pendingRequestsCount }} pending</span>
+                      <span class="badge">{{ group.role || "member" }}</span>
+                    </div>
+                  </div>
+
+                  <div class="user-card__actions">
+                    <button type="button" class="button button--ghost button--small" @click="openGroup(group.id)">
+                      Open group
+                    </button>
+                  </div>
+                </article>
+              </div>
+
+              <p v-else class="feed-note">You have not joined any groups yet. Create one or pick one from discovery.</p>
+            </template>
+
+            <template v-else-if="activeSidebarSection === 'discover'">
+              <div class="group-side-sheet__header">
+                <div>
+                  <p class="eyebrow">Discover</p>
+                  <h3>Explore groups</h3>
+                </div>
+                <p>{{ discoverGroups.length }} available</p>
+              </div>
+
+              <p v-if="isLoading" class="feed-note">Loading groups...</p>
+
+              <div v-else-if="discoverGroups.length" class="user-stack">
+                <article
+                  v-for="group in discoverGroups"
+                  :key="group.id"
+                  class="user-card group-card"
+                  :class="{ 'group-card--active': selectedGroup?.id === group.id }"
+                >
+                  <div class="group-card__body">
+                    <strong>{{ group.title }}</strong>
+                    <p class="group-card__summary">{{ group.description }}</p>
+                    <p class="feed-note">{{ groupSummary(group) }}</p>
+                  </div>
+
+                  <div class="user-card__actions">
+                    <button type="button" class="button button--ghost button--small" @click="openGroup(group.id)">
+                      Open
+                    </button>
+                    <button
+                      type="button"
+                      class="button button--small"
+                      :disabled="joinLoading[group.id] || group.joinRequestStatus === 'pending'"
+                      @click="handleJoinGroup(group.id)"
+                    >
+                      {{ joinButtonLabel(group) }}
+                    </button>
+                  </div>
+                </article>
+              </div>
+
+              <p v-else class="feed-note">Every existing group is already in your memberships. Create the next one to expand the map.</p>
+            </template>
+
+            <template v-else-if="activeSidebarSection === 'create-group'">
+              <div class="group-side-sheet__header">
+                <div>
+                  <p class="eyebrow">Create</p>
+                  <h3>Start a new group</h3>
+                </div>
+                <p>{{ groups.length }} total groups</p>
+              </div>
+
+              <form class="stack-form" @submit.prevent="handleCreateGroup">
+                <label>
+                  <span>Group title</span>
+                  <input
+                    v-model.trim="createForm.title"
+                    type="text"
+                    maxlength="120"
+                    placeholder="Product builders in London"
+                  />
+                </label>
+
+                <label>
+                  <span>Description</span>
+                  <textarea
+                    v-model.trim="createForm.description"
+                    rows="5"
+                    maxlength="2000"
+                    placeholder="Say what this community is for, who should join, and what people can expect here."
+                  ></textarea>
+                </label>
+
+                <div class="profile-form__actions">
+                  <p class="feed-note">Groups stay open to join in this MVP so we can ship the community core quickly.</p>
+                  <button type="submit" class="button" :disabled="isCreatingGroup">
+                    {{ isCreatingGroup ? "Creating..." : "Create group" }}
+                  </button>
+                </div>
+
+                <p v-if="createError" class="form-error">{{ createError }}</p>
+              </form>
+            </template>
+          </section>
+        </div>
       </div>
     </template>
   </section>
