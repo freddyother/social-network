@@ -96,6 +96,12 @@ function notificationTarget(notification) {
     }
   }
 
+  if (notification.entityType === "group" && notification.entityId) {
+    return {
+      path: `/groups/${encodeURIComponent(notification.entityId)}`
+    }
+  }
+
   if (notification.type === "follow_request_received") {
     return {
       path: "/profile/me",
@@ -119,6 +125,10 @@ function notificationActionLabel(notification) {
 
   if (notification?.entityType === "post") {
     return "Open post"
+  }
+
+  if (notification?.entityType === "group") {
+    return "Open group"
   }
 
   if (notification?.type === "follow_request_received") {

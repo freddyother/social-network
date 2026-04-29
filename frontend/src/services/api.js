@@ -84,6 +84,28 @@ function normalizeGroupPost(post) {
   }
 }
 
+function normalizeGroupComment(comment) {
+  if (!comment) {
+    return null
+  }
+
+  return {
+    ...comment,
+    author: normalizeUser(comment.author)
+  }
+}
+
+function normalizeGroupEvent(event) {
+  if (!event) {
+    return null
+  }
+
+  return {
+    ...event,
+    creator: normalizeUser(event.creator)
+  }
+}
+
 async function request(path, options = {}) {
   const headers = new Headers({
     Accept: "application/json",
@@ -243,6 +265,52 @@ export async function createGroupPost(groupId, post) {
   })
 
   return normalizeGroupPost(payload?.post || null)
+}
+
+export async function fetchGroupComments(groupId, postId) {
+  const payload = await request(`/groups/${groupId}/posts/${postId}/comments`, { method: "GET" })
+  return (payload?.comments || []).map(normalizeGroupComment)
+}
+
+export async function createGroupComment(groupId, postId, comment) {
+  const payload = await request(`/groups/${groupId}/posts/${postId}/comments`, {
+    method: "POST",
+    body: JSON.stringify(comment)
+  })
+
+  return normalizeGroupComment(payload?.comment || null)
+}
+
+export async function fetchGroupEvents(groupId) {
+  const payload = await request(`/groups/${groupId}/events`, { method: "GET" })
+  return (payload?.events || []).map(normalizeGroupEvent)
+}
+
+export async function createGroupEvent(groupId, event) {
+  const payload = await request(`/groups/${groupId}/events`, {
+    method: "POST",
+    body: JSON.stringify(event)
+  })
+
+  return normalizeGroupEvent(payload?.event || null)
+}
+
+export async function respondToGroupEvent(groupId, eventId, response) {
+  const payload = await request(`/groups/${groupId}/events/${eventId}/respond`, {
+    method: "POST",
+    body: JSON.stringify({ response })
+  })
+
+  return normalizeGroupEvent(payload?.event || null)
+}
+
+export async function inviteUserToGroup(groupId, invitation) {
+  const payload = await request(`/groups/${groupId}/invite`, {
+    method: "POST",
+    body: JSON.stringify(invitation)
+  })
+
+  return payload?.message || null
 }
 
 export async function searchAll(query) {

@@ -45,6 +45,7 @@ const isAuthenticated = computed(() => Boolean(store.state.currentUser))
 const currentUserId = computed(() => store.state.currentUser?.id || "")
 const activeConversationUserId = computed(() => routeConversationUserId())
 const notificationCleanupLoading = reactive({})
+const GROUP_INVITE_MESSAGE_PREFIX = "[nexo-group-invite]?"
 
 const MESSAGE_GROUP_WINDOW_MS = 2 * 60 * 1000
 const HISTORY_PAGE_SIZE = 10
@@ -96,9 +97,54 @@ function conversationPreview(message) {
     return "Start the conversation."
   }
 
+  const invite = messageGroupInvite(message)
+  if (invite) {
+    const prefix = isMine(message) ? "You: " : ""
+    return `${prefix}Group invite: ${invite.title}`.slice(0, 72)
+  }
+
   const prefix = isMine(message) ? "You: " : ""
   const body = String(message.body || "").trim()
   return `${prefix}${body}`.slice(0, 72)
+}
+
+function parseGroupInviteMessage(body) {
+  const normalizedBody = String(body || "").trim()
+  if (!normalizedBody.startsWith(GROUP_INVITE_MESSAGE_PREFIX)) {
+    return null
+  }
+
+  const query = normalizedBody.slice(GROUP_INVITE_MESSAGE_PREFIX.length)
+  const params = new URLSearchParams(query)
+  const groupId = String(params.get("groupId") || "").trim()
+  const title = String(params.get("title") || "").trim()
+  const note = String(params.get("note") || "").trim()
+
+  if (!groupId || !title) {
+    return null
+  }
+
+  return {
+    groupId,
+    title,
+    note
+  }
+}
+
+function messageGroupInvite(message) {
+  return parseGroupInviteMessage(message?.body)
+}
+
+function openInvitedGroup(groupId) {
+  const normalizedGroupId = String(groupId || "").trim()
+  if (!normalizedGroupId) {
+    return
+  }
+
+  void router.push({
+    name: "groups",
+    params: { groupId: normalizedGroupId }
+  })
 }
 
 function formatConversationTime(value) {
@@ -930,7 +976,21 @@ onBeforeUnmount(() => {
                           'chat-bubble--theirs': !group.mine
                         }"
                       >
-                        <p>{{ message.body }}</p>
+                        <div v-if="messageGroupInvite(message)" class="chat-invite-card">
+                          <p class="eyebrow">Group invite</p>
+                          <strong>{{ messageGroupInvite(message).title }}</strong>
+                          <p>
+                            {{ messageGroupInvite(message).note || "Open the group to review it and decide whether to join." }}
+                          </p>
+                          <button
+                            type="button"
+                            class="button button--small"
+                            @click="openInvitedGroup(messageGroupInvite(message).groupId)"
+                          >
+                            Open group
+                          </button>
+                        </div>
+                        <p v-else>{{ message.body }}</p>
                       </div>
                     </div>
 

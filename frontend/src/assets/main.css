@@ -892,12 +892,77 @@ select {
   background: var(--user-card-bg);
 }
 
+.group-post-card__actions,
+.group-event-card__header,
+.group-event-card__actions,
+.group-invite-suggestions__identity,
+.chat-invite-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.85rem;
+}
+
+.group-post-card__actions,
+.group-event-card__actions {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.group-event-form,
+.group-event-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.group-event-card {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--user-card-bg);
+}
+
+.group-event-card__header {
+  align-items: flex-start;
+}
+
+.group-event-card h4,
+.group-event-card p,
+.chat-invite-card p,
+.chat-invite-card strong {
+  margin: 0;
+}
+
+.group-event-card__body {
+  color: var(--ink);
+}
+
+.group-invite-suggestions {
+  margin-top: 1rem;
+}
+
+.group-invite-suggestions__identity {
+  align-items: center;
+  justify-content: flex-start;
+}
+
 .group-post-card__image {
   width: 100%;
   max-height: 420px;
   border: 1px solid var(--line);
   border-radius: 18px;
   object-fit: cover;
+}
+
+.chat-invite-card {
+  display: grid;
+  justify-items: start;
+  padding: 0.2rem 0;
+}
+
+.chat-invite-card .button {
+  margin-top: 0.2rem;
 }
 
 .search-form,
