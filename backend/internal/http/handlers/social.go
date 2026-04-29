@@ -25,6 +25,8 @@ type socialService interface {
 	CreateGroup(ctx context.Context, creator auth.User, input social.CreateGroupInput) (social.Group, error)
 	GroupByID(ctx context.Context, viewerID, groupID string) (social.Group, error)
 	JoinGroup(ctx context.Context, userID, groupID string) (social.Group, error)
+	GroupPosts(ctx context.Context, viewerID, groupID string) ([]social.GroupPost, error)
+	CreateGroupPost(ctx context.Context, author auth.User, groupID string, input social.CreateGroupPostInput) (social.GroupPost, error)
 	Search(ctx context.Context, viewerID, query string) (social.GlobalSearchResult, error)
 	Conversations(ctx context.Context, userID string) ([]social.ConversationSummary, error)
 	Conversation(ctx context.Context, viewerID, partnerID string) (social.ConversationThread, error)

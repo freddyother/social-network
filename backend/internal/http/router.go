@@ -76,6 +76,8 @@ func NewRouter(cfg config.Config, db *sql.DB) stdlibhttp.Handler {
 	mux.HandleFunc("POST /api/v1/groups", socialHandler.HandleCreateGroup)
 	mux.HandleFunc("GET /api/v1/groups/{groupID}", socialHandler.HandleGroup)
 	mux.HandleFunc("POST /api/v1/groups/{groupID}/join", socialHandler.HandleJoinGroup)
+	mux.HandleFunc("GET /api/v1/groups/{groupID}/posts", socialHandler.HandleGroupPosts)
+	mux.HandleFunc("POST /api/v1/groups/{groupID}/posts", socialHandler.HandleCreateGroupPost)
 	mux.HandleFunc("GET /api/v1/search", socialHandler.HandleSearch)
 	mux.HandleFunc("GET /api/v1/chat/conversations", socialHandler.HandleConversations)
 	mux.HandleFunc("GET /api/v1/chat/conversations/{userID}/messages", socialHandler.HandleConversation)

@@ -2,7 +2,15 @@
 import { computed, reactive, ref, watch } from "vue"
 import { useRouter } from "vue-router"
 
-import { createGroup, fetchGroup, fetchGroups, isApiError, joinGroup } from "../services/api"
+import {
+  createGroup,
+  createGroupPost,
+  fetchGroup,
+  fetchGroupPosts,
+  fetchGroups,
+  isApiError,
+  joinGroup
+} from "../services/api"
 import { useAppStore } from "../stores/app"
 import { formatRelativeTime } from "../utils/date"
 
@@ -17,18 +25,29 @@ const store = useAppStore()
 const router = useRouter()
 
 const isAuthenticated = computed(() => Boolean(store.state.currentUser))
+const currentUserId = computed(() => store.state.currentUser?.id || "")
 const groups = ref([])
 const selectedGroup = ref(null)
+const groupPosts = ref([])
 const isLoading = ref(false)
 const isLoadingDetail = ref(false)
+const isLoadingGroupPosts = ref(false)
 const isCreatingGroup = ref(false)
+const isCreatingGroupPost = ref(false)
 const createError = ref("")
+const createGroupPostError = ref("")
 const requestError = ref("")
+const groupPostsError = ref("")
 const joinLoading = reactive({})
 const createForm = reactive({
   title: "",
   description: ""
 })
+const groupPostForm = reactive({
+  body: ""
+})
+
+let groupPostsRequestToken = 0
 
 const activeGroupId = computed(() => String(props.groupId || "").trim())
 const joinedGroups = computed(() => groups.value.filter((group) => group.isMember))
@@ -60,6 +79,20 @@ function groupSummary(group) {
   return `${group.membersCount || 0} members · ${group.postsCount || 0} posts · ${group.eventsCount || 0} events`
 }
 
+function groupPostTimestampLabel(post) {
+  if (!post) {
+    return ""
+  }
+
+  return post.updatedAt !== post.createdAt
+    ? `Edited ${formatRelativeTime(post.updatedAt)}`
+    : formatRelativeTime(post.createdAt)
+}
+
+function commentCountLabel(count) {
+  return Number(count || 0) === 1 ? "1 reply" : `${Number(count || 0)} replies`
+}
+
 function sortGroups(items) {
   return [...items].sort((left, right) => {
     if (left.isMember !== right.isMember) {
@@ -86,6 +119,41 @@ function upsertGroup(nextGroup) {
   groups.value = sortGroups(nextGroups)
 }
 
+function bumpGroupPostsCount(groupId, delta) {
+  const normalizedGroupId = String(groupId || "").trim()
+  if (!normalizedGroupId || !delta) {
+    return
+  }
+
+  groups.value = groups.value.map((group) =>
+    group.id === normalizedGroupId
+      ? {
+          ...group,
+          postsCount: Math.max(0, Number(group.postsCount || 0) + delta)
+        }
+      : group
+  )
+
+  if (selectedGroup.value?.id === normalizedGroupId) {
+    selectedGroup.value = {
+      ...selectedGroup.value,
+      postsCount: Math.max(0, Number(selectedGroup.value.postsCount || 0) + delta)
+    }
+  }
+}
+
+function clearGroupPostsState({ clearComposer = true } = {}) {
+  groupPostsRequestToken += 1
+  groupPosts.value = []
+  groupPostsError.value = ""
+  createGroupPostError.value = ""
+  isLoadingGroupPosts.value = false
+
+  if (clearComposer) {
+    groupPostForm.body = ""
+  }
+}
+
 async function openGroup(groupId = "") {
   const normalizedGroupId = String(groupId || "").trim()
   await router.push(normalizedGroupId ? { name: "groups", params: { groupId: normalizedGroupId } } : { name: "groups" })
@@ -97,6 +165,7 @@ async function loadGroupsList() {
     selectedGroup.value = null
     requestError.value = ""
     createError.value = ""
+    clearGroupPostsState()
     return
   }
 
@@ -157,6 +226,39 @@ async function loadSelectedGroup(groupId) {
   }
 }
 
+async function loadGroupPosts(groupId) {
+  const normalizedGroupId = String(groupId || "").trim()
+  if (!normalizedGroupId) {
+    clearGroupPostsState()
+    return
+  }
+
+  const requestToken = ++groupPostsRequestToken
+  isLoadingGroupPosts.value = true
+  groupPostsError.value = ""
+  createGroupPostError.value = ""
+  groupPosts.value = []
+
+  try {
+    const loadedPosts = await fetchGroupPosts(normalizedGroupId)
+    if (requestToken !== groupPostsRequestToken) {
+      return
+    }
+
+    groupPosts.value = loadedPosts
+  } catch (error) {
+    if (requestToken !== groupPostsRequestToken) {
+      return
+    }
+
+    groupPostsError.value = error instanceof Error ? error.message : "Could not load the group posts."
+  } finally {
+    if (requestToken === groupPostsRequestToken) {
+      isLoadingGroupPosts.value = false
+    }
+  }
+}
+
 async function handleCreateGroup() {
   isCreatingGroup.value = true
   createError.value = ""
@@ -209,6 +311,37 @@ async function handleJoinGroup(groupId = selectedGroup.value?.id || "") {
   }
 }
 
+async function handleCreateGroupPost() {
+  const normalizedGroupId = String(selectedGroup.value?.id || "").trim()
+  if (!normalizedGroupId) {
+    return
+  }
+
+  isCreatingGroupPost.value = true
+  createGroupPostError.value = ""
+  requestError.value = ""
+
+  try {
+    const createdPost = await createGroupPost(normalizedGroupId, {
+      body: groupPostForm.body
+    })
+
+    groupPosts.value = [createdPost, ...groupPosts.value.filter((post) => post.id !== createdPost.id)]
+    groupPostForm.body = ""
+    bumpGroupPostsCount(normalizedGroupId, 1)
+  } catch (error) {
+    if (isApiError(error)) {
+      createGroupPostError.value =
+        error.payload?.fields?.body ||
+        error.message
+    } else {
+      createGroupPostError.value = "Could not publish in this group right now."
+    }
+  } finally {
+    isCreatingGroupPost.value = false
+  }
+}
+
 watch(
   () => store.state.currentUser?.id,
   () => {
@@ -232,21 +365,48 @@ watch(
   },
   { immediate: true }
 )
+
+watch(
+  () => [selectedGroup.value?.id || "", selectedGroup.value?.isMember ? "1" : "0"],
+  ([groupId, isMember], previous = []) => {
+    if (!isAuthenticated.value) {
+      clearGroupPostsState()
+      return
+    }
+
+    const previousGroupId = previous[0] || ""
+    if (groupId !== previousGroupId) {
+      clearGroupPostsState()
+    }
+
+    if (!groupId || isMember !== "1") {
+      if (!groupId || isMember !== "1") {
+        groupPosts.value = []
+        groupPostsError.value = ""
+        isLoadingGroupPosts.value = false
+      }
+      return
+    }
+
+    void loadGroupPosts(groupId)
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
   <section class="page">
     <div class="panel">
       <p class="eyebrow">Groups</p>
-      <h2>Community spaces are live</h2>
+      <h2>Community spaces now have an internal timeline</h2>
       <p>
-        Phase 1 unlocks group creation, discovery, memberships, and searchable group pages. Internal posts, shared chat, invitations, and events land next.
+        Phase 2 adds member-only group posts on top of creation, discovery, memberships, and global search. Events and group chat are the next layers.
       </p>
     </div>
 
     <div v-if="!isAuthenticated" class="panel panel--narrow">
       <h3>Login required</h3>
-      <p>Sign in to create groups, join communities, and explore the new social spaces.</p>
+      <p>Sign in to create groups, join communities, and participate in each group's internal discussion.</p>
     </div>
 
     <template v-else>
@@ -284,7 +444,7 @@ watch(
             </label>
 
             <div class="profile-form__actions">
-              <p class="feed-note">Groups are open to join in this first phase so we can wire up the community core quickly.</p>
+              <p class="feed-note">Groups stay open to join in this MVP so we can ship the community core quickly.</p>
               <button type="submit" class="button" :disabled="isCreatingGroup">
                 {{ isCreatingGroup ? "Creating..." : "Create group" }}
               </button>
@@ -327,7 +487,7 @@ watch(
 
             <div class="profile-form__actions">
               <p class="feed-note">
-                {{ selectedGroup.isMember ? "You already belong to this group and can track its next verticals from here." : "Join now to be ready for internal posts, events, and group chat as the next phases arrive." }}
+                {{ selectedGroup.isMember ? "You can read and publish in this group's internal timeline now." : "Join this group to unlock its internal discussion timeline." }}
               </p>
               <button
                 v-if="!selectedGroup.isMember"
@@ -349,6 +509,98 @@ watch(
           </div>
         </section>
       </div>
+
+      <section class="panel">
+        <div class="feed-header">
+          <div>
+            <p class="eyebrow">Discussion</p>
+            <h3>{{ selectedGroup ? `Inside ${selectedGroup.title}` : "Group timeline" }}</h3>
+          </div>
+          <p v-if="selectedGroup">{{ selectedGroup.postsCount || 0 }} posts</p>
+        </div>
+
+        <div v-if="!selectedGroup" class="profile-empty-state">
+          <h3>Pick a group first</h3>
+          <p>Open one of your groups or a discovery result to load its internal timeline.</p>
+        </div>
+
+        <template v-else-if="selectedGroup.isMember">
+          <form class="stack-form group-post-composer" @submit.prevent="handleCreateGroupPost">
+            <label>
+              <span>Start a conversation</span>
+              <textarea
+                v-model.trim="groupPostForm.body"
+                rows="4"
+                maxlength="4000"
+                placeholder="Share an update, ask for feedback, or kick off the next thread for this group."
+              ></textarea>
+            </label>
+
+            <div class="profile-form__actions">
+              <p class="feed-note">Only members can read and publish inside this phase-2 timeline.</p>
+              <button type="submit" class="button" :disabled="isCreatingGroupPost">
+                {{ isCreatingGroupPost ? "Publishing..." : "Publish in group" }}
+              </button>
+            </div>
+
+            <p v-if="createGroupPostError" class="form-error">{{ createGroupPostError }}</p>
+          </form>
+
+          <p v-if="isLoadingGroupPosts" class="feed-note">Loading group posts...</p>
+          <p v-else-if="groupPostsError" class="form-error">{{ groupPostsError }}</p>
+
+          <div v-else-if="groupPosts.length" class="group-post-stack">
+            <article v-for="post in groupPosts" :key="post.id" class="post-card group-post-card">
+              <div class="post-card__header">
+                <div class="post-card__header-main">
+                  <span class="user-avatar user-avatar--small">
+                    <img
+                      v-if="post.author?.avatarUrl"
+                      :src="post.author.avatarUrl"
+                      :alt="`${displayName(post.author)} avatar`"
+                      class="user-avatar__image"
+                    />
+                    <span v-else class="user-avatar__fallback">{{ userInitials(post.author) }}</span>
+                  </span>
+
+                  <div>
+                    <strong>{{ displayName(post.author) }}</strong>
+                    <div class="post-card__meta">
+                      <span>{{ commentCountLabel(post.commentsCount) }}</span>
+                      <span>{{ groupPostTimestampLabel(post) }}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <span v-if="post.author?.id === currentUserId" class="badge">you</span>
+              </div>
+
+              <div class="post-card__body">
+                <p>{{ post.body }}</p>
+                <img v-if="post.imageUrl" :src="post.imageUrl" alt="" class="group-post-card__image" />
+              </div>
+            </article>
+          </div>
+
+          <div v-else class="profile-empty-state group-posts-empty">
+            <h3>No posts yet</h3>
+            <p>Be the first person to start the conversation inside this group.</p>
+          </div>
+        </template>
+
+        <div v-else class="profile-empty-state group-posts-locked">
+          <h3>Join to see the conversation</h3>
+          <p>This group's internal timeline is only visible to members in this phase.</p>
+          <button
+            type="button"
+            class="button"
+            :disabled="joinLoading[selectedGroup.id]"
+            @click="handleJoinGroup(selectedGroup.id)"
+          >
+            {{ joinLoading[selectedGroup.id] ? "Joining..." : "Join group" }}
+          </button>
+        </div>
+      </section>
 
       <div class="grid grid--two">
         <section class="panel">
@@ -374,6 +626,7 @@ watch(
                 <p class="group-card__summary">{{ group.description }}</p>
                 <div class="group-card__stats">
                   <span class="badge badge--neutral">{{ group.membersCount }} members</span>
+                  <span class="badge badge--neutral">{{ group.postsCount }} posts</span>
                   <span class="badge">{{ group.role || "member" }}</span>
                 </div>
               </div>

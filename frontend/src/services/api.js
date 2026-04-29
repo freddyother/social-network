@@ -72,6 +72,18 @@ function normalizeGroup(group) {
   }
 }
 
+function normalizeGroupPost(post) {
+  if (!post) {
+    return null
+  }
+
+  return {
+    ...post,
+    imageUrl: resolveUploadUrl(post.imageUrl),
+    author: normalizeUser(post.author)
+  }
+}
+
 async function request(path, options = {}) {
   const headers = new Headers({
     Accept: "application/json",
@@ -217,6 +229,20 @@ export async function joinGroup(groupId) {
   })
 
   return normalizeGroup(payload?.group || null)
+}
+
+export async function fetchGroupPosts(groupId) {
+  const payload = await request(`/groups/${groupId}/posts`, { method: "GET" })
+  return (payload?.posts || []).map(normalizeGroupPost)
+}
+
+export async function createGroupPost(groupId, post) {
+  const payload = await request(`/groups/${groupId}/posts`, {
+    method: "POST",
+    body: JSON.stringify(post)
+  })
+
+  return normalizeGroupPost(payload?.post || null)
 }
 
 export async function searchAll(query) {
