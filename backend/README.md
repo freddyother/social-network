@@ -61,11 +61,6 @@ SMTP_FROM_EMAIL=
 SMTP_FROM_NAME=NEXO
 ```
 
-You can also reuse existing shell exports from another project by exposing
-`SPRING_MAIL_HOST`, `SPRING_MAIL_PORT`, `SPRING_MAIL_USERNAME`, and
-`SPRING_MAIL_PASSWORD`. When `SMTP_FROM_EMAIL` is empty, the backend falls back
-to the SMTP username as the sender address.
-
 ## Local Run
 
 ```bash
