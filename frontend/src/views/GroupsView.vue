@@ -3,14 +3,17 @@ import { computed, reactive, ref, watch } from "vue"
 import { useRouter } from "vue-router"
 
 import {
+  acceptGroupJoinRequest,
   createGroup,
   createGroupComment,
   createGroupEvent,
   createGroupPost,
-  fetchDiscoverUsers,
+  declineGroupJoinRequest,
   fetchGroup,
   fetchGroupComments,
   fetchGroupEvents,
+  fetchGroupInviteCandidates,
+  fetchGroupJoinRequests,
   fetchGroupPosts,
   fetchGroups,
   inviteUserToGroup,
@@ -38,11 +41,13 @@ const selectedGroup = ref(null)
 const groupPosts = ref([])
 const groupEvents = ref([])
 const inviteUsers = ref([])
+const groupJoinRequests = ref([])
 const isLoading = ref(false)
 const isLoadingDetail = ref(false)
 const isLoadingGroupPosts = ref(false)
 const isLoadingGroupEvents = ref(false)
 const isLoadingInviteUsers = ref(false)
+const isLoadingGroupJoinRequests = ref(false)
 const isCreatingGroup = ref(false)
 const isCreatingGroupPost = ref(false)
 const isCreatingGroupEvent = ref(false)
@@ -56,7 +61,9 @@ const inviteUsersError = ref("")
 const requestError = ref("")
 const groupPostsError = ref("")
 const groupEventsError = ref("")
+const groupJoinRequestsError = ref("")
 const joinLoading = reactive({})
+const groupJoinRequestActionLoading = reactive({})
 const groupCommentsExpanded = reactive({})
 const groupCommentsByPost = reactive({})
 const groupCommentsLoading = reactive({})
@@ -84,10 +91,12 @@ const inviteForm = reactive({
 
 let groupPostsRequestToken = 0
 let groupEventsRequestToken = 0
+let groupJoinRequestsRequestToken = 0
 
 const activeGroupId = computed(() => String(props.groupId || "").trim())
 const joinedGroups = computed(() => groups.value.filter((group) => group.isMember))
 const discoverGroups = computed(() => groups.value.filter((group) => !group.isMember))
+const canManageJoinRequests = computed(() => selectedGroup.value?.role === "creator")
 const suggestedInviteUsers = computed(() =>
   inviteUsers.value.filter((user) => user.id !== currentUserId.value)
 )
@@ -115,7 +124,17 @@ function groupSummary(group) {
     return ""
   }
 
-  return `${group.membersCount || 0} members · ${group.postsCount || 0} posts · ${group.eventsCount || 0} events`
+  const parts = [
+    `${group.membersCount || 0} members`,
+    `${group.postsCount || 0} posts`,
+    `${group.eventsCount || 0} events`
+  ]
+
+  if (Number(group.pendingRequestsCount || 0) > 0) {
+    parts.push(`${group.pendingRequestsCount} pending`)
+  }
+
+  return parts.join(" · ")
 }
 
 function groupPostTimestampLabel(post) {
@@ -325,14 +344,52 @@ function clearGroupEventsState({ clearComposer = true } = {}) {
   }
 }
 
+function clearGroupJoinRequestsState() {
+  groupJoinRequestsRequestToken += 1
+  groupJoinRequests.value = []
+  groupJoinRequestsError.value = ""
+  isLoadingGroupJoinRequests.value = false
+  clearReactiveMap(groupJoinRequestActionLoading)
+}
+
+function joinButtonLabel(group) {
+  if (joinLoading[group?.id]) {
+    return "Sending..."
+  }
+
+  if (group?.joinRequestStatus === "pending") {
+    return "Request pending"
+  }
+
+  return "Request to join"
+}
+
+function selectedGroupAccessCopy(group) {
+  if (!group) {
+    return ""
+  }
+
+  if (group.isMember) {
+    return "You can post, comment, plan events, and invite people into this space now."
+  }
+
+  if (group.joinRequestStatus === "pending") {
+    return "Your join request is pending review by the group creator."
+  }
+
+  return "Request access to this group and wait for the creator to approve you."
+}
+
 async function openGroup(groupId = "") {
   const normalizedGroupId = String(groupId || "").trim()
   await router.push(normalizedGroupId ? { name: "groups", params: { groupId: normalizedGroupId } } : { name: "groups" })
 }
 
 async function loadInviteUsers() {
-  if (!isAuthenticated.value) {
+  const normalizedGroupId = String(selectedGroup.value?.id || "").trim()
+  if (!isAuthenticated.value || !normalizedGroupId || !selectedGroup.value?.isMember) {
     inviteUsers.value = []
+    inviteForm.recipientId = ""
     inviteUsersError.value = ""
     return
   }
@@ -341,7 +398,12 @@ async function loadInviteUsers() {
   inviteUsersError.value = ""
 
   try {
-    inviteUsers.value = await fetchDiscoverUsers()
+    inviteUsers.value = await fetchGroupInviteCandidates(normalizedGroupId)
+
+    const hasSelectedRecipient = inviteUsers.value.some((user) => user.id === inviteForm.recipientId)
+    if (!hasSelectedRecipient) {
+      inviteForm.recipientId = ""
+    }
 
     if (!inviteForm.recipientId && inviteUsers.value[0]?.id) {
       inviteForm.recipientId = inviteUsers.value[0].id
@@ -490,6 +552,38 @@ async function loadGroupEvents(groupId) {
   }
 }
 
+async function loadGroupJoinRequests(groupId) {
+  const normalizedGroupId = String(groupId || "").trim()
+  if (!normalizedGroupId) {
+    clearGroupJoinRequestsState()
+    return
+  }
+
+  const requestToken = ++groupJoinRequestsRequestToken
+  isLoadingGroupJoinRequests.value = true
+  groupJoinRequestsError.value = ""
+  groupJoinRequests.value = []
+
+  try {
+    const requests = await fetchGroupJoinRequests(normalizedGroupId)
+    if (requestToken !== groupJoinRequestsRequestToken) {
+      return
+    }
+
+    groupJoinRequests.value = requests
+  } catch (error) {
+    if (requestToken !== groupJoinRequestsRequestToken) {
+      return
+    }
+
+    groupJoinRequestsError.value = error instanceof Error ? error.message : "Could not load join requests."
+  } finally {
+    if (requestToken === groupJoinRequestsRequestToken) {
+      isLoadingGroupJoinRequests.value = false
+    }
+  }
+}
+
 async function loadGroupComments(post) {
   const postId = String(post?.id || "").trim()
   const groupId = String(selectedGroup.value?.id || "").trim()
@@ -562,6 +656,11 @@ async function handleJoinGroup(groupId = selectedGroup.value?.id || "") {
     return
   }
 
+  const existingGroup = groups.value.find((group) => group.id === normalizedGroupId)
+  if (existingGroup?.joinRequestStatus === "pending") {
+    return
+  }
+
   joinLoading[normalizedGroupId] = true
   requestError.value = ""
 
@@ -572,9 +671,40 @@ async function handleJoinGroup(groupId = selectedGroup.value?.id || "") {
       selectedGroup.value = joinedGroup
     }
   } catch (error) {
-    requestError.value = error instanceof Error ? error.message : "Could not join this group."
+    requestError.value = error instanceof Error ? error.message : "Could not send the join request."
   } finally {
     joinLoading[normalizedGroupId] = false
+  }
+}
+
+async function handleRespondToGroupJoinRequest(joinRequest, accept) {
+  const normalizedGroupId = String(selectedGroup.value?.id || "").trim()
+  const normalizedRequestId = String(joinRequest?.id || "").trim()
+  if (!normalizedGroupId || !normalizedRequestId) {
+    return
+  }
+
+  groupJoinRequestActionLoading[normalizedRequestId] = true
+  groupJoinRequestsError.value = ""
+
+  try {
+    if (accept) {
+      await acceptGroupJoinRequest(normalizedGroupId, normalizedRequestId)
+    } else {
+      await declineGroupJoinRequest(normalizedGroupId, normalizedRequestId)
+    }
+
+    groupJoinRequests.value = groupJoinRequests.value.filter((request) => request.id !== normalizedRequestId)
+
+    const refreshedGroup = await fetchGroup(normalizedGroupId)
+    upsertGroup(refreshedGroup)
+    if (selectedGroup.value?.id === normalizedGroupId) {
+      selectedGroup.value = refreshedGroup
+    }
+  } catch (error) {
+    groupJoinRequestsError.value = error instanceof Error ? error.message : "Could not update this join request."
+  } finally {
+    groupJoinRequestActionLoading[normalizedRequestId] = false
   }
 }
 
@@ -728,6 +858,7 @@ async function handleInviteUserToGroup() {
 
     inviteForm.note = ""
     inviteSuccess.value = `Invitation sent to ${recipientName}.`
+    await loadInviteUsers()
   } catch (error) {
     if (isApiError(error)) {
       inviteError.value =
@@ -745,7 +876,7 @@ async function handleInviteUserToGroup() {
 watch(
   () => store.state.currentUser?.id,
   () => {
-    void Promise.allSettled([loadGroupsList(), loadInviteUsers()])
+    void loadGroupsList()
   },
   { immediate: true }
 )
@@ -772,6 +903,7 @@ watch(
     if (!isAuthenticated.value) {
       clearGroupPostsState()
       clearGroupEventsState()
+      clearGroupJoinRequestsState()
       return
     }
 
@@ -779,6 +911,9 @@ watch(
     if (groupId !== previousGroupId) {
       clearGroupPostsState()
       clearGroupEventsState()
+      inviteUsers.value = []
+      inviteForm.recipientId = ""
+      clearGroupJoinRequestsState()
       inviteError.value = ""
       inviteSuccess.value = ""
     }
@@ -790,11 +925,18 @@ watch(
       groupEventsError.value = ""
       isLoadingGroupPosts.value = false
       isLoadingGroupEvents.value = false
-      return
+    } else {
+      void loadGroupPosts(groupId)
+      void loadGroupEvents(groupId)
     }
 
-    void loadGroupPosts(groupId)
-    void loadGroupEvents(groupId)
+    if (selectedGroup.value?.role === "creator") {
+      void loadGroupJoinRequests(groupId)
+    } else {
+      clearGroupJoinRequestsState()
+    }
+
+    void loadInviteUsers()
   },
   { immediate: true }
 )
@@ -888,21 +1030,25 @@ watch(
               <span class="badge badge--neutral">{{ selectedGroup.membersCount }} members</span>
               <span class="badge badge--neutral">{{ selectedGroup.postsCount }} posts</span>
               <span class="badge badge--neutral">{{ selectedGroup.eventsCount }} events</span>
+              <span v-if="selectedGroup.pendingRequestsCount" class="badge badge--neutral">
+                {{ selectedGroup.pendingRequestsCount }} pending
+              </span>
               <span v-if="selectedGroup.isMember" class="badge">{{ selectedGroup.role || "member" }}</span>
+              <span v-else-if="selectedGroup.joinRequestStatus === 'pending'" class="badge badge--neutral">pending</span>
             </div>
 
             <div class="profile-form__actions">
               <p class="feed-note">
-                {{ selectedGroup.isMember ? "You can post, comment, plan events, and invite people into this space now." : "Join this group to unlock its internal timeline, events, and invitation flow." }}
+                {{ selectedGroupAccessCopy(selectedGroup) }}
               </p>
               <button
                 v-if="!selectedGroup.isMember"
                 type="button"
                 class="button"
-                :disabled="joinLoading[selectedGroup.id]"
+                :disabled="joinLoading[selectedGroup.id] || selectedGroup.joinRequestStatus === 'pending'"
                 @click="handleJoinGroup(selectedGroup.id)"
               >
-                {{ joinLoading[selectedGroup.id] ? "Joining..." : "Join group" }}
+                {{ joinButtonLabel(selectedGroup) }}
               </button>
             </div>
 
@@ -915,6 +1061,68 @@ watch(
           </div>
         </section>
       </div>
+
+      <section v-if="selectedGroup && canManageJoinRequests" class="panel">
+        <div class="feed-header">
+          <div>
+            <p class="eyebrow">Requests</p>
+            <h3>Pending join requests</h3>
+          </div>
+          <p>{{ isLoadingGroupJoinRequests ? "Refreshing..." : `${groupJoinRequests.length} pending` }}</p>
+        </div>
+
+        <p v-if="groupJoinRequestsError" class="form-error">{{ groupJoinRequestsError }}</p>
+        <p v-else-if="isLoadingGroupJoinRequests" class="feed-note">Loading join requests...</p>
+
+        <div v-else-if="groupJoinRequests.length" class="user-stack">
+          <article
+            v-for="joinRequest in groupJoinRequests"
+            :key="joinRequest.id"
+            class="user-card group-join-request-card"
+          >
+            <div class="group-invite-suggestions__identity">
+              <span class="user-avatar user-avatar--small">
+                <img
+                  v-if="joinRequest.requester?.avatarUrl"
+                  :src="joinRequest.requester.avatarUrl"
+                  :alt="`${displayName(joinRequest.requester)} avatar`"
+                  class="user-avatar__image"
+                />
+                <span v-else class="user-avatar__fallback">{{ userInitials(joinRequest.requester) }}</span>
+              </span>
+
+              <div>
+                <strong>{{ displayName(joinRequest.requester) }}</strong>
+                <p class="feed-note">Requested {{ formatRelativeTime(joinRequest.createdAt) }}</p>
+              </div>
+            </div>
+
+            <div class="user-card__actions">
+              <button
+                type="button"
+                class="button button--ghost button--small"
+                :disabled="groupJoinRequestActionLoading[joinRequest.id]"
+                @click="handleRespondToGroupJoinRequest(joinRequest, false)"
+              >
+                {{ groupJoinRequestActionLoading[joinRequest.id] ? "Saving..." : "Decline" }}
+              </button>
+              <button
+                type="button"
+                class="button button--small"
+                :disabled="groupJoinRequestActionLoading[joinRequest.id]"
+                @click="handleRespondToGroupJoinRequest(joinRequest, true)"
+              >
+                {{ groupJoinRequestActionLoading[joinRequest.id] ? "Saving..." : "Accept" }}
+              </button>
+            </div>
+          </article>
+        </div>
+
+        <div v-else class="profile-empty-state">
+          <h3>No pending requests</h3>
+          <p>New requests to join this group will appear here for approval.</p>
+        </div>
+      </section>
 
       <section class="panel">
         <div class="feed-header">
@@ -1055,10 +1263,10 @@ watch(
           <button
             type="button"
             class="button"
-            :disabled="joinLoading[selectedGroup.id]"
+            :disabled="joinLoading[selectedGroup.id] || selectedGroup.joinRequestStatus === 'pending'"
             @click="handleJoinGroup(selectedGroup.id)"
           >
-            {{ joinLoading[selectedGroup.id] ? "Joining..." : "Join group" }}
+            {{ joinButtonLabel(selectedGroup) }}
           </button>
         </div>
       </section>
@@ -1285,6 +1493,7 @@ watch(
                   <span class="badge badge--neutral">{{ group.membersCount }} members</span>
                   <span class="badge badge--neutral">{{ group.postsCount }} posts</span>
                   <span class="badge badge--neutral">{{ group.eventsCount }} events</span>
+                  <span v-if="group.pendingRequestsCount" class="badge badge--neutral">{{ group.pendingRequestsCount }} pending</span>
                   <span class="badge">{{ group.role || "member" }}</span>
                 </div>
               </div>
@@ -1331,10 +1540,10 @@ watch(
                 <button
                   type="button"
                   class="button button--small"
-                  :disabled="joinLoading[group.id]"
+                  :disabled="joinLoading[group.id] || group.joinRequestStatus === 'pending'"
                   @click="handleJoinGroup(group.id)"
                 >
-                  {{ joinLoading[group.id] ? "Joining..." : "Join" }}
+                  {{ joinButtonLabel(group) }}
                 </button>
               </div>
             </article>

@@ -106,6 +106,17 @@ function normalizeGroupEvent(event) {
   }
 }
 
+function normalizeGroupJoinRequest(request) {
+  if (!request) {
+    return null
+  }
+
+  return {
+    ...request,
+    requester: normalizeUser(request.requester)
+  }
+}
+
 async function request(path, options = {}) {
   const headers = new Headers({
     Accept: "application/json",
@@ -253,6 +264,27 @@ export async function joinGroup(groupId) {
   return normalizeGroup(payload?.group || null)
 }
 
+export async function fetchGroupJoinRequests(groupId) {
+  const payload = await request(`/groups/${groupId}/join-requests`, { method: "GET" })
+  return (payload?.requests || []).map(normalizeGroupJoinRequest)
+}
+
+export async function acceptGroupJoinRequest(groupId, requestId) {
+  const payload = await request(`/groups/${groupId}/join-requests/${requestId}/accept`, {
+    method: "POST"
+  })
+
+  return normalizeGroupJoinRequest(payload?.request || null)
+}
+
+export async function declineGroupJoinRequest(groupId, requestId) {
+  const payload = await request(`/groups/${groupId}/join-requests/${requestId}/decline`, {
+    method: "POST"
+  })
+
+  return normalizeGroupJoinRequest(payload?.request || null)
+}
+
 export async function fetchGroupPosts(groupId) {
   const payload = await request(`/groups/${groupId}/posts`, { method: "GET" })
   return (payload?.posts || []).map(normalizeGroupPost)
@@ -302,6 +334,11 @@ export async function respondToGroupEvent(groupId, eventId, response) {
   })
 
   return normalizeGroupEvent(payload?.event || null)
+}
+
+export async function fetchGroupInviteCandidates(groupId) {
+  const payload = await request(`/groups/${groupId}/invite-candidates`, { method: "GET" })
+  return payload?.users || []
 }
 
 export async function inviteUserToGroup(groupId, invitation) {

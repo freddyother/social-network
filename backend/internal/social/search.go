@@ -223,14 +223,27 @@ func (s Service) searchGroups(ctx context.Context, viewerID, query string) ([]Gr
 				u.nickname,
 				u.avatar_url,
 				gm.role,
+				viewer_request.id,
+				viewer_request.status,
 				COALESCE(member_counts.members_count, 0) AS members_count,
 				COALESCE(post_counts.posts_count, 0) AS posts_count,
-				COALESCE(event_counts.events_count, 0) AS events_count
+				COALESCE(event_counts.events_count, 0) AS events_count,
+				COALESCE(request_counts.pending_requests_count, 0) AS pending_requests_count
 			FROM groups g
 			INNER JOIN users u ON u.id = g.creator_id
 			LEFT JOIN group_memberships gm
 				ON gm.group_id = g.id
 				AND gm.user_id = $1
+			LEFT JOIN LATERAL (
+				SELECT gjr.id, gjr.status
+				FROM group_join_requests gjr
+				WHERE
+					gjr.group_id = g.id
+					AND gjr.requester_id = $1
+					AND gjr.status = 'pending'
+				ORDER BY gjr.created_at DESC, gjr.id DESC
+				LIMIT 1
+			) viewer_request ON TRUE
 			LEFT JOIN (
 				SELECT group_id, COUNT(*)::INT AS members_count
 				FROM group_memberships
@@ -246,6 +259,12 @@ func (s Service) searchGroups(ctx context.Context, viewerID, query string) ([]Gr
 				FROM group_events
 				GROUP BY group_id
 			) event_counts ON event_counts.group_id = g.id
+			LEFT JOIN (
+				SELECT group_id, COUNT(*)::INT AS pending_requests_count
+				FROM group_join_requests
+				WHERE status = 'pending'
+				GROUP BY group_id
+			) request_counts ON request_counts.group_id = g.id
 			WHERE
 				LOWER(BTRIM(g.title)) LIKE '%' || LOWER($2) || '%'
 				OR LOWER(BTRIM(g.description)) LIKE '%' || LOWER($2) || '%'

@@ -25,17 +25,20 @@ type GroupUser struct {
 }
 
 type Group struct {
-	ID           string    `json:"id"`
-	Title        string    `json:"title"`
-	Description  string    `json:"description"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
-	MembersCount int       `json:"membersCount"`
-	PostsCount   int       `json:"postsCount"`
-	EventsCount  int       `json:"eventsCount"`
-	IsMember     bool      `json:"isMember"`
-	Role         string    `json:"role,omitempty"`
-	Creator      GroupUser `json:"creator"`
+	ID                   string    `json:"id"`
+	Title                string    `json:"title"`
+	Description          string    `json:"description"`
+	CreatedAt            time.Time `json:"createdAt"`
+	UpdatedAt            time.Time `json:"updatedAt"`
+	MembersCount         int       `json:"membersCount"`
+	PostsCount           int       `json:"postsCount"`
+	EventsCount          int       `json:"eventsCount"`
+	PendingRequestsCount int       `json:"pendingRequestsCount"`
+	IsMember             bool      `json:"isMember"`
+	Role                 string    `json:"role,omitempty"`
+	JoinRequestID        string    `json:"joinRequestId,omitempty"`
+	JoinRequestStatus    string    `json:"joinRequestStatus,omitempty"`
+	Creator              GroupUser `json:"creator"`
 }
 
 type CreateGroupInput struct {
@@ -59,14 +62,27 @@ func (s Service) Groups(ctx context.Context, viewerID string) ([]Group, error) {
 				u.nickname,
 				u.avatar_url,
 				gm.role,
+				viewer_request.id,
+				viewer_request.status,
 				COALESCE(member_counts.members_count, 0) AS members_count,
 				COALESCE(post_counts.posts_count, 0) AS posts_count,
-				COALESCE(event_counts.events_count, 0) AS events_count
+				COALESCE(event_counts.events_count, 0) AS events_count,
+				COALESCE(request_counts.pending_requests_count, 0) AS pending_requests_count
 			FROM groups g
 			INNER JOIN users u ON u.id = g.creator_id
 			LEFT JOIN group_memberships gm
 				ON gm.group_id = g.id
 				AND gm.user_id = $1
+			LEFT JOIN LATERAL (
+				SELECT gjr.id, gjr.status
+				FROM group_join_requests gjr
+				WHERE
+					gjr.group_id = g.id
+					AND gjr.requester_id = $1
+					AND gjr.status = 'pending'
+				ORDER BY gjr.created_at DESC, gjr.id DESC
+				LIMIT 1
+			) viewer_request ON TRUE
 			LEFT JOIN (
 				SELECT group_id, COUNT(*)::INT AS members_count
 				FROM group_memberships
@@ -82,6 +98,12 @@ func (s Service) Groups(ctx context.Context, viewerID string) ([]Group, error) {
 				FROM group_events
 				GROUP BY group_id
 			) event_counts ON event_counts.group_id = g.id
+			LEFT JOIN (
+				SELECT group_id, COUNT(*)::INT AS pending_requests_count
+				FROM group_join_requests
+				WHERE status = 'pending'
+				GROUP BY group_id
+			) request_counts ON request_counts.group_id = g.id
 			ORDER BY
 				CASE WHEN gm.user_id IS NULL THEN 1 ELSE 0 END,
 				g.created_at DESC,
@@ -193,32 +215,110 @@ func (s Service) JoinGroup(ctx context.Context, userID, groupID string) (Group, 
 	}()
 
 	var exists bool
+	var creatorID string
+	var groupTitle string
 	if err = tx.QueryRowContext(
 		ctx,
-		`SELECT EXISTS (SELECT 1 FROM groups WHERE id = $1)`,
+		`
+			SELECT
+				EXISTS (SELECT 1 FROM groups WHERE id = $1),
+				COALESCE((SELECT creator_id FROM groups WHERE id = $1), ''),
+				COALESCE((SELECT title FROM groups WHERE id = $1), '')
+		`,
 		normalizedGroupID,
-	).Scan(&exists); err != nil {
+	).Scan(&exists, &creatorID, &groupTitle); err != nil {
 		return Group{}, fmt.Errorf("check group existence: %w", err)
 	}
 	if !exists {
 		return Group{}, ErrNotFound
 	}
 
-	if _, err = tx.ExecContext(
+	var existingRole sql.NullString
+	if err = tx.QueryRowContext(
 		ctx,
 		`
-			INSERT INTO group_memberships (group_id, user_id, role)
-			VALUES ($1, $2, 'member')
-			ON CONFLICT (group_id, user_id) DO NOTHING
+			SELECT role
+			FROM group_memberships
+			WHERE group_id = $1 AND user_id = $2
 		`,
 		normalizedGroupID,
 		userID,
-	); err != nil {
-		return Group{}, fmt.Errorf("insert group membership: %w", err)
+	).Scan(&existingRole); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return Group{}, fmt.Errorf("load existing group membership: %w", err)
+	}
+
+	if existingRole.Valid {
+		if err = tx.Commit(); err != nil {
+			return Group{}, fmt.Errorf("commit join group transaction: %w", err)
+		}
+
+		return s.loadGroupByIDWithReader(ctx, s.db, userID, normalizedGroupID)
+	}
+
+	var pendingRequestID string
+	if err = tx.QueryRowContext(
+		ctx,
+		`
+			SELECT id
+			FROM group_join_requests
+			WHERE group_id = $1 AND requester_id = $2 AND status = 'pending'
+			ORDER BY created_at DESC, id DESC
+			LIMIT 1
+		`,
+		normalizedGroupID,
+		userID,
+	).Scan(&pendingRequestID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return Group{}, fmt.Errorf("load existing group join request: %w", err)
+	}
+
+	var createdNotification Notification
+	if strings.TrimSpace(pendingRequestID) == "" {
+		requestID, tokenErr := newToken(16)
+		if tokenErr != nil {
+			return Group{}, fmt.Errorf("generate group join request id: %w", tokenErr)
+		}
+
+		if _, err = tx.ExecContext(
+			ctx,
+			`
+				INSERT INTO group_join_requests (id, group_id, requester_id, status)
+				VALUES ($1, $2, $3, 'pending')
+			`,
+			requestID,
+			normalizedGroupID,
+			userID,
+		); err != nil {
+			return Group{}, fmt.Errorf("insert group join request: %w", err)
+		}
+
+		requesterIdentity, identityErr := s.loadUserIdentity(ctx, tx, userID)
+		if identityErr != nil {
+			return Group{}, identityErr
+		}
+
+		createdNotification, err = s.insertNotification(
+			ctx,
+			tx,
+			creatorID,
+			"group_join_request_received",
+			"New group join request",
+			fmt.Sprintf("%s requested to join \"%s\".", requesterIdentity.DisplayName(), groupTitle),
+			"group",
+			normalizedGroupID,
+		)
+		if err != nil {
+			return Group{}, err
+		}
 	}
 
 	if err = tx.Commit(); err != nil {
 		return Group{}, fmt.Errorf("commit join group transaction: %w", err)
+	}
+
+	if createdNotification.ID != "" {
+		s.publisher.PublishToUser(creatorID, "notification.created", NotificationEvent{
+			Notification: createdNotification,
+		})
 	}
 
 	return s.loadGroupByIDWithReader(ctx, s.db, userID, normalizedGroupID)
@@ -250,14 +350,27 @@ func (s Service) loadGroupByIDWithReader(ctx context.Context, reader sqlReader, 
 				u.nickname,
 				u.avatar_url,
 				gm.role,
+				viewer_request.id,
+				viewer_request.status,
 				COALESCE(member_counts.members_count, 0) AS members_count,
 				COALESCE(post_counts.posts_count, 0) AS posts_count,
-				COALESCE(event_counts.events_count, 0) AS events_count
+				COALESCE(event_counts.events_count, 0) AS events_count,
+				COALESCE(request_counts.pending_requests_count, 0) AS pending_requests_count
 			FROM groups g
 			INNER JOIN users u ON u.id = g.creator_id
 			LEFT JOIN group_memberships gm
 				ON gm.group_id = g.id
 				AND gm.user_id = $1
+			LEFT JOIN LATERAL (
+				SELECT gjr.id, gjr.status
+				FROM group_join_requests gjr
+				WHERE
+					gjr.group_id = g.id
+					AND gjr.requester_id = $1
+					AND gjr.status = 'pending'
+				ORDER BY gjr.created_at DESC, gjr.id DESC
+				LIMIT 1
+			) viewer_request ON TRUE
 			LEFT JOIN (
 				SELECT group_id, COUNT(*)::INT AS members_count
 				FROM group_memberships
@@ -273,6 +386,12 @@ func (s Service) loadGroupByIDWithReader(ctx context.Context, reader sqlReader, 
 				FROM group_events
 				GROUP BY group_id
 			) event_counts ON event_counts.group_id = g.id
+			LEFT JOIN (
+				SELECT group_id, COUNT(*)::INT AS pending_requests_count
+				FROM group_join_requests
+				WHERE status = 'pending'
+				GROUP BY group_id
+			) request_counts ON request_counts.group_id = g.id
 			WHERE g.id = $2
 		`,
 		viewerID,
@@ -297,10 +416,12 @@ type groupScanner interface {
 
 func (s Service) scanGroup(scanner groupScanner) (Group, error) {
 	var (
-		group            Group
-		creatorNickname  sql.NullString
-		creatorAvatarURL sql.NullString
-		membershipRole   sql.NullString
+		group             Group
+		creatorNickname   sql.NullString
+		creatorAvatarURL  sql.NullString
+		membershipRole    sql.NullString
+		joinRequestID     sql.NullString
+		joinRequestStatus sql.NullString
 	)
 	if err := scanner.Scan(
 		&group.ID,
@@ -314,9 +435,12 @@ func (s Service) scanGroup(scanner groupScanner) (Group, error) {
 		&creatorNickname,
 		&creatorAvatarURL,
 		&membershipRole,
+		&joinRequestID,
+		&joinRequestStatus,
 		&group.MembersCount,
 		&group.PostsCount,
 		&group.EventsCount,
+		&group.PendingRequestsCount,
 	); err != nil {
 		return Group{}, err
 	}
@@ -327,6 +451,8 @@ func (s Service) scanGroup(scanner groupScanner) (Group, error) {
 	}
 
 	group.Role = nullStringValue(membershipRole)
+	group.JoinRequestID = nullStringValue(joinRequestID)
+	group.JoinRequestStatus = nullStringValue(joinRequestStatus)
 	group.IsMember = group.Role != ""
 	return group, nil
 }

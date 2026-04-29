@@ -181,3 +181,20 @@ func (h SocialHandler) HandleInviteUserToGroup(w stdlibhttp.ResponseWriter, r *s
 		"message": message,
 	})
 }
+
+func (h SocialHandler) HandleGroupInviteCandidates(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	currentUser, ok := h.requireCurrentUser(w, r)
+	if !ok {
+		return
+	}
+
+	users, err := h.service.GroupInviteCandidates(r.Context(), currentUser.ID, strings.TrimSpace(r.PathValue("groupID")))
+	if err != nil {
+		h.handleSocialError(w, err)
+		return
+	}
+
+	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
+		"users": users,
+	})
+}

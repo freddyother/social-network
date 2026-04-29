@@ -25,6 +25,8 @@ type socialService interface {
 	CreateGroup(ctx context.Context, creator auth.User, input social.CreateGroupInput) (social.Group, error)
 	GroupByID(ctx context.Context, viewerID, groupID string) (social.Group, error)
 	JoinGroup(ctx context.Context, userID, groupID string) (social.Group, error)
+	GroupJoinRequests(ctx context.Context, viewerID, groupID string) ([]social.GroupJoinRequest, error)
+	RespondToGroupJoinRequest(ctx context.Context, viewerID, groupID, requestID string, accept bool) (social.GroupJoinRequest, error)
 	GroupPosts(ctx context.Context, viewerID, groupID string) ([]social.GroupPost, error)
 	CreateGroupPost(ctx context.Context, author auth.User, groupID string, input social.CreateGroupPostInput) (social.GroupPost, error)
 	GroupComments(ctx context.Context, viewerID, groupID, groupPostID string) ([]social.GroupComment, error)
@@ -32,6 +34,7 @@ type socialService interface {
 	GroupEvents(ctx context.Context, viewerID, groupID string) ([]social.GroupEvent, error)
 	CreateGroupEvent(ctx context.Context, creator auth.User, groupID string, input social.CreateGroupEventInput) (social.GroupEvent, error)
 	RespondToGroupEvent(ctx context.Context, userID, groupID, eventID, response string) (social.GroupEvent, error)
+	GroupInviteCandidates(ctx context.Context, viewerID, groupID string) ([]social.SuggestedUser, error)
 	InviteUserToGroup(ctx context.Context, sender auth.User, groupID string, input social.InviteUserToGroupInput) (social.PrivateMessage, error)
 	Search(ctx context.Context, viewerID, query string) (social.GlobalSearchResult, error)
 	Conversations(ctx context.Context, userID string) ([]social.ConversationSummary, error)
@@ -667,7 +670,7 @@ func (h SocialHandler) handleSocialError(w stdlibhttp.ResponseWriter, err error)
 			"user": "You cannot follow yourself.",
 		})
 	case errors.Is(err, social.ErrAlreadyHandled):
-		writeError(w, stdlibhttp.StatusConflict, "That follow request has already been handled.", nil)
+		writeError(w, stdlibhttp.StatusConflict, "That request has already been handled.", nil)
 	default:
 		writeError(w, stdlibhttp.StatusInternalServerError, "Something went wrong on the server.", nil)
 	}
