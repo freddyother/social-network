@@ -148,6 +148,55 @@ func (h SocialHandler) HandleRespondGroupEvent(w stdlibhttp.ResponseWriter, r *s
 	})
 }
 
+func (h SocialHandler) HandleGroupMessages(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	currentUser, ok := h.requireCurrentUser(w, r)
+	if !ok {
+		return
+	}
+
+	messages, err := h.service.GroupMessages(r.Context(), currentUser.ID, strings.TrimSpace(r.PathValue("groupID")))
+	if err != nil {
+		h.handleSocialError(w, err)
+		return
+	}
+
+	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
+		"messages": messages,
+	})
+}
+
+func (h SocialHandler) HandleSendGroupMessage(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	currentUser, ok := h.requireCurrentUser(w, r)
+	if !ok {
+		return
+	}
+
+	var payload struct {
+		Body string `json:"body"`
+	}
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdlibhttp.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	message, err := h.service.SendGroupMessage(
+		r.Context(),
+		*currentUser,
+		strings.TrimSpace(r.PathValue("groupID")),
+		social.SendGroupMessageInput{
+			Body: payload.Body,
+		},
+	)
+	if err != nil {
+		h.handleSocialError(w, err)
+		return
+	}
+
+	response.JSON(w, stdlibhttp.StatusCreated, map[string]any{
+		"message": message,
+	})
+}
+
 func (h SocialHandler) HandleInviteUserToGroup(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
 	currentUser, ok := h.requireCurrentUser(w, r)
 	if !ok {

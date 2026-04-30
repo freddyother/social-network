@@ -34,6 +34,8 @@ type socialService interface {
 	GroupEvents(ctx context.Context, viewerID, groupID string) ([]social.GroupEvent, error)
 	CreateGroupEvent(ctx context.Context, creator auth.User, groupID string, input social.CreateGroupEventInput) (social.GroupEvent, error)
 	RespondToGroupEvent(ctx context.Context, userID, groupID, eventID, response string) (social.GroupEvent, error)
+	GroupMessages(ctx context.Context, viewerID, groupID string) ([]social.GroupMessage, error)
+	SendGroupMessage(ctx context.Context, sender auth.User, groupID string, input social.SendGroupMessageInput) (social.GroupMessage, error)
 	GroupInviteCandidates(ctx context.Context, viewerID, groupID string) ([]social.SuggestedUser, error)
 	InviteUserToGroup(ctx context.Context, sender auth.User, groupID string, input social.InviteUserToGroupInput) (social.PrivateMessage, error)
 	Search(ctx context.Context, viewerID, query string) (social.GlobalSearchResult, error)

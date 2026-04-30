@@ -110,6 +110,17 @@ function normalizeGroupEvent(event) {
   }
 }
 
+export function normalizeGroupMessage(message) {
+  if (!message) {
+    return null
+  }
+
+  return {
+    ...message,
+    sender: normalizeUser(message.sender)
+  }
+}
+
 function normalizeGroupJoinRequest(request) {
   if (!request) {
     return null
@@ -345,6 +356,20 @@ export async function respondToGroupEvent(groupId, eventId, response) {
   })
 
   return normalizeGroupEvent(payload?.event || null)
+}
+
+export async function fetchGroupMessages(groupId) {
+  const payload = await request(`/groups/${groupId}/messages`, { method: "GET" })
+  return (payload?.messages || []).map(normalizeGroupMessage)
+}
+
+export async function sendGroupMessage(groupId, message) {
+  const payload = await request(`/groups/${groupId}/messages`, {
+    method: "POST",
+    body: JSON.stringify(message)
+  })
+
+  return normalizeGroupMessage(payload?.message || null)
 }
 
 export async function fetchGroupInviteCandidates(groupId) {

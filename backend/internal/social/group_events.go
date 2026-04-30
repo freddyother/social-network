@@ -101,13 +101,21 @@ func (s Service) CreateGroupEvent(ctx context.Context, creator auth.User, groupI
 		return GroupEvent{}, fmt.Errorf("generate group event id: %w", err)
 	}
 
-	var createdAt time.Time
-	if err := s.db.QueryRowContext(
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return GroupEvent{}, fmt.Errorf("begin create group event transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err = tx.ExecContext(
 		ctx,
 		`
 			INSERT INTO group_events (id, group_id, creator_id, title, description, starts_at)
 			VALUES ($1, $2, $3, $4, $5, $6)
-			RETURNING created_at
 		`,
 		eventID,
 		normalizedGroupID,
@@ -115,25 +123,30 @@ func (s Service) CreateGroupEvent(ctx context.Context, creator auth.User, groupI
 		normalizedInput.Title,
 		normalizedInput.Description,
 		normalizedInput.StartsAt,
-	).Scan(&createdAt); err != nil {
+	); err != nil {
 		return GroupEvent{}, fmt.Errorf("insert group event: %w", err)
 	}
 
-	return GroupEvent{
-		ID:          eventID,
-		GroupID:     normalizedGroupID,
-		Title:       normalizedInput.Title,
-		Description: normalizedInput.Description,
-		StartsAt:    normalizedInput.StartsAt,
-		CreatedAt:   createdAt,
-		Creator: GroupUser{
-			ID:        creator.ID,
-			FirstName: creator.FirstName,
-			LastName:  creator.LastName,
-			Nickname:  creator.Nickname,
-			AvatarURL: creator.AvatarURL,
-		},
-	}, nil
+	if _, err = tx.ExecContext(
+		ctx,
+		`
+			INSERT INTO event_responses (event_id, user_id, response)
+			VALUES ($1, $2, 'going')
+			ON CONFLICT (event_id, user_id) DO UPDATE SET
+				response = 'going',
+				responded_at = NOW()
+		`,
+		eventID,
+		creator.ID,
+	); err != nil {
+		return GroupEvent{}, fmt.Errorf("mark group event creator as going: %w", err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return GroupEvent{}, fmt.Errorf("commit create group event transaction: %w", err)
+	}
+
+	return s.loadGroupEventByID(ctx, creator.ID, normalizedGroupID, eventID)
 }
 
 func (s Service) RespondToGroupEvent(ctx context.Context, userID, groupID, eventID, response string) (GroupEvent, error) {
