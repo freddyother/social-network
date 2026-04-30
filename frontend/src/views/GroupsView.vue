@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { useRouter } from "vue-router"
 
 import {
@@ -14,17 +14,13 @@ import {
   fetchGroupEvents,
   fetchGroupInviteCandidates,
   fetchGroupJoinRequests,
-  fetchGroupMessages,
   fetchGroupPosts,
   fetchGroups,
   inviteUserToGroup,
   isApiError,
   joinGroup,
-  normalizeGroupMessage,
-  respondToGroupEvent,
-  sendGroupMessage
+  respondToGroupEvent
 } from "../services/api"
-import { realtimeClient } from "../services/realtime"
 import { useAppStore } from "../stores/app"
 import { formatDateTime, formatRelativeTime } from "../utils/date"
 
@@ -44,35 +40,29 @@ const groups = ref([])
 const selectedGroup = ref(null)
 const groupPosts = ref([])
 const groupEvents = ref([])
-const groupMessages = ref([])
 const inviteUsers = ref([])
 const groupJoinRequests = ref([])
 const activeSidebarSection = ref("")
 const previousBodyOverflow = ref("")
-const groupMessageList = ref(null)
 const isLoading = ref(false)
 const isLoadingDetail = ref(false)
 const isLoadingGroupPosts = ref(false)
 const isLoadingGroupEvents = ref(false)
-const isLoadingGroupMessages = ref(false)
 const isLoadingInviteUsers = ref(false)
 const isLoadingGroupJoinRequests = ref(false)
 const isCreatingGroup = ref(false)
 const isCreatingGroupPost = ref(false)
 const isCreatingGroupEvent = ref(false)
-const isSendingGroupMessage = ref(false)
 const isSendingInvite = ref(false)
 const createError = ref("")
 const createGroupPostError = ref("")
 const createGroupEventError = ref("")
-const groupMessageError = ref("")
 const inviteError = ref("")
 const inviteSuccess = ref("")
 const inviteUsersError = ref("")
 const requestError = ref("")
 const groupPostsError = ref("")
 const groupEventsError = ref("")
-const groupMessagesError = ref("")
 const groupJoinRequestsError = ref("")
 const joinLoading = reactive({})
 const groupJoinRequestActionLoading = reactive({})
@@ -99,9 +89,6 @@ const groupEventForm = reactive({
   description: "",
   startsAtLocal: ""
 })
-const groupMessageForm = reactive({
-  body: ""
-})
 const inviteForm = reactive({
   recipientId: "",
   note: ""
@@ -109,9 +96,7 @@ const inviteForm = reactive({
 
 let groupPostsRequestToken = 0
 let groupEventsRequestToken = 0
-let groupMessagesRequestToken = 0
 let groupJoinRequestsRequestToken = 0
-const removeRealtimeListeners = []
 
 const activeGroupId = computed(() => String(props.groupId || "").trim())
 const joinedGroups = computed(() => groups.value.filter((group) => group.isMember))
@@ -119,7 +104,6 @@ const discoverGroups = computed(() => groups.value.filter((group) => !group.isMe
 const canManageJoinRequests = computed(() => selectedGroup.value?.role === "creator")
 const isSelectedGroupMember = computed(() => Boolean(selectedGroup.value?.isMember))
 const nextUpcomingGroupEvent = computed(() => groupEvents.value[0] || null)
-const latestGroupMessage = computed(() => groupMessages.value[groupMessages.value.length - 1] || null)
 const isSidebarModalOpen = computed(() => Boolean(activeSidebarSection.value))
 const suggestedInviteUsers = computed(() =>
   inviteUsers.value.filter((user) => user.id !== currentUserId.value)
@@ -159,11 +143,7 @@ const sidebarCards = computed(() => {
       id: "chat",
       eyebrow: "Chat",
       title: "Group messages",
-      meta: isLoadingGroupMessages.value
-        ? "Refreshing chat..."
-        : latestGroupMessage.value
-          ? `${displayName(latestGroupMessage.value.sender)} · ${formatRelativeTime(latestGroupMessage.value.sentAt)}`
-          : "Start the group thread"
+      meta: "Open this group in messages"
     })
     cards.push({
       id: "create-event",
@@ -272,18 +252,6 @@ function groupCommentTimestampLabel(comment) {
   }
 
   return formatRelativeTime(comment.createdAt)
-}
-
-function groupMessageTimestampLabel(message) {
-  if (!message) {
-    return ""
-  }
-
-  return formatDateTime(message.sentAt)
-}
-
-function isOwnGroupMessage(message) {
-  return message?.senderId === currentUserId.value
 }
 
 function commentCountLabel(count) {
@@ -579,18 +547,6 @@ function clearGroupEventsState({ clearComposer = true } = {}) {
   }
 }
 
-function clearGroupMessagesState({ clearComposer = true } = {}) {
-  groupMessagesRequestToken += 1
-  groupMessages.value = []
-  groupMessagesError.value = ""
-  groupMessageError.value = ""
-  isLoadingGroupMessages.value = false
-
-  if (clearComposer) {
-    groupMessageForm.body = ""
-  }
-}
-
 function clearGroupJoinRequestsState() {
   groupJoinRequestsRequestToken += 1
   groupJoinRequests.value = []
@@ -632,6 +588,28 @@ async function openGroup(groupId = "") {
   await router.push(normalizedGroupId ? { name: "groups", params: { groupId: normalizedGroupId } } : { name: "groups" })
 }
 
+async function openGroupChat(groupId = selectedGroup.value?.id || "") {
+  const normalizedGroupId = String(groupId || "").trim()
+  if (!normalizedGroupId) {
+    return
+  }
+
+  closeSidebarModal()
+  await router.push({
+    path: "/chat",
+    query: { group: normalizedGroupId }
+  })
+}
+
+function handleSidebarCardClick(sectionId) {
+  if (sectionId === "chat") {
+    void openGroupChat()
+    return
+  }
+
+  selectSidebarSection(sectionId)
+}
+
 async function loadInviteUsers() {
   const normalizedGroupId = String(selectedGroup.value?.id || "").trim()
   if (!isAuthenticated.value || !normalizedGroupId || !selectedGroup.value?.isMember) {
@@ -670,7 +648,6 @@ async function loadGroupsList() {
     createError.value = ""
     clearGroupPostsState()
     clearGroupEventsState()
-    clearGroupMessagesState()
     return
   }
 
@@ -800,50 +777,6 @@ async function loadGroupEvents(groupId) {
   }
 }
 
-async function scrollGroupMessagesToBottom() {
-  await nextTick()
-  const container = groupMessageList.value
-  if (!container) {
-    return
-  }
-
-  container.scrollTop = container.scrollHeight
-}
-
-async function loadGroupMessages(groupId) {
-  const normalizedGroupId = String(groupId || "").trim()
-  if (!normalizedGroupId) {
-    clearGroupMessagesState()
-    return
-  }
-
-  const requestToken = ++groupMessagesRequestToken
-  isLoadingGroupMessages.value = true
-  groupMessagesError.value = ""
-  groupMessageError.value = ""
-  groupMessages.value = []
-
-  try {
-    const loadedMessages = await fetchGroupMessages(normalizedGroupId)
-    if (requestToken !== groupMessagesRequestToken) {
-      return
-    }
-
-    groupMessages.value = loadedMessages
-    await scrollGroupMessagesToBottom()
-  } catch (error) {
-    if (requestToken !== groupMessagesRequestToken) {
-      return
-    }
-
-    groupMessagesError.value = error instanceof Error ? error.message : "Could not load group messages."
-  } finally {
-    if (requestToken === groupMessagesRequestToken) {
-      isLoadingGroupMessages.value = false
-    }
-  }
-}
-
 async function loadGroupJoinRequests(groupId) {
   const normalizedGroupId = String(groupId || "").trim()
   if (!normalizedGroupId) {
@@ -910,42 +843,6 @@ async function toggleGroupComments(post) {
   if (groupCommentsExpanded[postId] && !groupCommentsLoaded[postId]) {
     await loadGroupComments(post)
   }
-}
-
-function upsertGroupMessage(message, { scroll = false } = {}) {
-  const normalizedMessageId = String(message?.id || "").trim()
-  const normalizedGroupId = String(message?.groupId || "").trim()
-  if (!normalizedMessageId || !normalizedGroupId || normalizedGroupId !== selectedGroup.value?.id) {
-    return
-  }
-
-  const nextMessages = groupMessages.value.some((item) => item.id === normalizedMessageId)
-    ? groupMessages.value.map((item) => (item.id === normalizedMessageId ? message : item))
-    : [...groupMessages.value, message]
-
-  groupMessages.value = nextMessages.sort((left, right) => {
-    const sentAtDiff = Date.parse(left.sentAt || 0) - Date.parse(right.sentAt || 0)
-    if (sentAtDiff !== 0) {
-      return sentAtDiff
-    }
-
-    return String(left.id || "").localeCompare(String(right.id || ""))
-  })
-
-  if (scroll) {
-    void scrollGroupMessagesToBottom()
-  }
-}
-
-function handleRealtimeGroupMessage(payload) {
-  const message = normalizeGroupMessage(payload?.message)
-  if (!message) {
-    return
-  }
-
-  upsertGroupMessage(message, {
-    scroll: activeSidebarSection.value === "chat"
-  })
 }
 
 async function handleCreateGroup() {
@@ -1171,36 +1068,6 @@ async function handleRespondToGroupEvent(event, response) {
   }
 }
 
-async function handleSendGroupMessage() {
-  const normalizedGroupId = String(selectedGroup.value?.id || "").trim()
-  if (!normalizedGroupId) {
-    return
-  }
-
-  isSendingGroupMessage.value = true
-  groupMessageError.value = ""
-  groupMessagesError.value = ""
-
-  try {
-    const message = await sendGroupMessage(normalizedGroupId, {
-      body: groupMessageForm.body
-    })
-
-    groupMessageForm.body = ""
-    upsertGroupMessage(message, { scroll: true })
-  } catch (error) {
-    if (isApiError(error)) {
-      groupMessageError.value =
-        error.payload?.fields?.body ||
-        error.message
-    } else {
-      groupMessageError.value = "Could not send the group message right now."
-    }
-  } finally {
-    isSendingGroupMessage.value = false
-  }
-}
-
 async function handleInviteUserToGroup() {
   const normalizedGroupId = String(selectedGroup.value?.id || "").trim()
   if (!normalizedGroupId) {
@@ -1269,7 +1136,6 @@ watch(
     if (!isAuthenticated.value) {
       clearGroupPostsState()
       clearGroupEventsState()
-      clearGroupMessagesState()
       clearGroupJoinRequestsState()
       return
     }
@@ -1278,7 +1144,6 @@ watch(
     if (groupId !== previousGroupId) {
       clearGroupPostsState()
       clearGroupEventsState()
-      clearGroupMessagesState()
       inviteUsers.value = []
       inviteForm.recipientId = ""
       clearGroupJoinRequestsState()
@@ -1289,17 +1154,13 @@ watch(
     if (!groupId || isMember !== "1") {
       groupPosts.value = []
       groupEvents.value = []
-      groupMessages.value = []
       groupPostsError.value = ""
       groupEventsError.value = ""
-      groupMessagesError.value = ""
       isLoadingGroupPosts.value = false
       isLoadingGroupEvents.value = false
-      isLoadingGroupMessages.value = false
     } else {
       void loadGroupPosts(groupId)
       void loadGroupEvents(groupId)
-      void loadGroupMessages(groupId)
     }
 
     if (selectedGroup.value?.role === "creator") {
@@ -1316,7 +1177,7 @@ watch(
 watch(
   () => sidebarCards.value.map((card) => card.id).join("|"),
   (value) => {
-    const availableIds = value ? value.split("|").filter(Boolean) : []
+    const availableIds = value ? value.split("|").filter((id) => id && id !== "chat") : []
     if (!availableIds.length || !availableIds.includes(activeSidebarSection.value)) {
       activeSidebarSection.value = ""
     }
@@ -1328,17 +1189,9 @@ onMounted(() => {
   if (typeof window !== "undefined") {
     window.addEventListener("keydown", handleWindowKeydown)
   }
-
-  removeRealtimeListeners.push(
-    realtimeClient.on("group.message.created", (event) => {
-      handleRealtimeGroupMessage(event?.payload)
-    })
-  )
 })
 
 onBeforeUnmount(() => {
-  removeRealtimeListeners.splice(0).forEach((dispose) => dispose())
-
   if (typeof window !== "undefined") {
     window.removeEventListener("keydown", handleWindowKeydown)
   }
@@ -1362,15 +1215,6 @@ watch(
       document.body.style.overflow = "hidden"
     } else {
       document.body.style.overflow = previousBodyOverflow.value
-    }
-  }
-)
-
-watch(
-  () => activeSidebarSection.value,
-  (section) => {
-    if (section === "chat") {
-      void scrollGroupMessagesToBottom()
     }
   }
 )
@@ -1603,7 +1447,7 @@ watch(
                 type="button"
                 class="group-side-launcher"
                 :class="{ 'group-side-launcher--active': activeSidebarSection === card.id }"
-                @click="selectSidebarSection(card.id)"
+                @click="handleSidebarCardClick(card.id)"
               >
                 <p class="eyebrow">{{ card.eyebrow }}</p>
                 <div class="group-side-launcher__title">
@@ -1614,7 +1458,7 @@ watch(
             </div>
           </section>
 
-          <p class="feed-note groups-feed-side__hint">Tap a card to open the full workspace in a modal.</p>
+          <p class="feed-note groups-feed-side__hint">Tap a card to open group tools or jump into member messages.</p>
         </aside>
       </div>
 
@@ -1702,6 +1546,14 @@ watch(
                     @click="selectSidebarSection('events')"
                   >
                     View events
+                  </button>
+                  <button
+                    v-if="selectedGroup.isMember"
+                    type="button"
+                    class="button button--ghost button--small"
+                    @click="openGroupChat(selectedGroup.id)"
+                  >
+                    Open chat
                   </button>
                 </div>
               </template>
@@ -1894,83 +1746,6 @@ watch(
 
                 <p v-if="createGroupEventError" class="form-error">{{ createGroupEventError }}</p>
               </form>
-            </template>
-
-            <template v-else-if="activeSidebarSection === 'chat'">
-              <div class="group-side-sheet__header">
-                <div>
-                  <p class="eyebrow">Chat</p>
-                  <h3>{{ selectedGroup ? `${selectedGroup.title} messages` : "Group messages" }}</h3>
-                </div>
-                <p>{{ isLoadingGroupMessages ? "Refreshing..." : `${groupMessages.length} messages` }}</p>
-              </div>
-
-              <div v-if="!selectedGroup" class="profile-empty-state">
-                <h3>Select a group</h3>
-                <p>Open a group to read its member messages.</p>
-              </div>
-
-              <div v-else-if="!selectedGroup.isMember" class="profile-empty-state">
-                <h3>Join to chat</h3>
-                <p>Group messages stay visible to members only.</p>
-              </div>
-
-              <template v-else>
-                <p v-if="isLoadingGroupMessages" class="feed-note">Loading group messages...</p>
-                <p v-else-if="groupMessagesError" class="form-error">{{ groupMessagesError }}</p>
-
-                <div ref="groupMessageList" class="group-message-list">
-                  <article
-                    v-for="message in groupMessages"
-                    :key="message.id"
-                    class="group-message"
-                    :class="{ 'group-message--mine': isOwnGroupMessage(message) }"
-                  >
-                    <span v-if="!isOwnGroupMessage(message)" class="user-avatar user-avatar--small">
-                      <img
-                        v-if="message.sender?.avatarUrl"
-                        :src="message.sender.avatarUrl"
-                        :alt="`${displayName(message.sender)} avatar`"
-                        class="user-avatar__image"
-                      />
-                      <span v-else class="user-avatar__fallback">{{ userInitials(message.sender) }}</span>
-                    </span>
-
-                    <div class="group-message__body">
-                      <header>
-                        <strong>{{ isOwnGroupMessage(message) ? "You" : displayName(message.sender) }}</strong>
-                        <span>{{ groupMessageTimestampLabel(message) }}</span>
-                      </header>
-                      <p>{{ message.body }}</p>
-                    </div>
-                  </article>
-
-                  <p v-if="!groupMessages.length && !isLoadingGroupMessages" class="feed-note">
-                    No messages yet. Start the group thread.
-                  </p>
-                </div>
-
-                <form class="stack-form group-message-composer" @submit.prevent="handleSendGroupMessage">
-                  <label>
-                    <span>Message</span>
-                    <textarea
-                      v-model.trim="groupMessageForm.body"
-                      rows="3"
-                      maxlength="2000"
-                      placeholder="Write to everyone in this group."
-                    ></textarea>
-                  </label>
-
-                  <div class="profile-form__actions">
-                    <p class="feed-note">Messages are visible to current group members.</p>
-                    <button type="submit" class="button" :disabled="isSendingGroupMessage">
-                      {{ isSendingGroupMessage ? "Sending..." : "Send message" }}
-                    </button>
-                  </div>
-
-                  <p v-if="groupMessageError" class="form-error">{{ groupMessageError }}</p>
-                </form>
-              </template>
             </template>
 
             <template v-else-if="activeSidebarSection === 'invite'">

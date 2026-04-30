@@ -5,9 +5,14 @@ import { useRoute, useRouter } from "vue-router"
 import {
   fetchChatConversations,
   fetchDiscoverUsers,
+  fetchGroup,
+  fetchGroupMessages,
+  fetchGroups,
   fetchNotifications,
   isApiError,
   markNotificationRead,
+  normalizeGroupMessage,
+  sendGroupMessage,
   sendPrivateMessage
 } from "../services/api"
 import { realtimeClient } from "../services/realtime"
@@ -19,8 +24,10 @@ const route = useRoute()
 const router = useRouter()
 
 const conversations = ref([])
+const groupChats = ref([])
 const discoverUsers = ref([])
 const conversationUser = ref(null)
+const activeGroup = ref(null)
 const messages = ref([])
 const pageError = ref("")
 const threadError = ref("")
@@ -44,6 +51,9 @@ const removeRealtimeListeners = []
 const isAuthenticated = computed(() => Boolean(store.state.currentUser))
 const currentUserId = computed(() => store.state.currentUser?.id || "")
 const activeConversationUserId = computed(() => routeConversationUserId())
+const activeGroupId = computed(() => routeGroupId())
+const isGroupThread = computed(() => Boolean(activeGroupId.value))
+const hasSelectedThread = computed(() => Boolean(activeGroupId.value || activeConversationUserId.value))
 const notificationCleanupLoading = reactive({})
 const GROUP_INVITE_MESSAGE_PREFIX = "[nexo-group-invite]?"
 
@@ -51,6 +61,14 @@ const MESSAGE_GROUP_WINDOW_MS = 2 * 60 * 1000
 const HISTORY_PAGE_SIZE = 10
 
 function routeConversationUserId(rawValue = route.query.user) {
+  if (Array.isArray(rawValue)) {
+    return String(rawValue[0] || "").trim()
+  }
+
+  return typeof rawValue === "string" ? rawValue.trim() : ""
+}
+
+function routeGroupId(rawValue = route.query.group) {
   if (Array.isArray(rawValue)) {
     return String(rawValue[0] || "").trim()
   }
@@ -66,14 +84,22 @@ function displayName(user) {
   return user.nickname || `${user.firstName} ${user.lastName}`.trim() || "Unknown account"
 }
 
-function userInitials(user) {
-  const source = displayName(user)
-  return source
+function initialsFromText(value, fallback = "N") {
+  return String(value || "")
+    .trim()
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() || "")
-    .join("") || "N"
+    .join("") || fallback
+}
+
+function userInitials(user) {
+  return initialsFromText(displayName(user), "N")
+}
+
+function groupInitials(group) {
+  return initialsFromText(group?.title, "G")
 }
 
 function isMine(message) {
@@ -92,6 +118,14 @@ function sortConversations(items) {
   })
 }
 
+function sortGroupChats(items) {
+  return [...items].sort((left, right) => {
+    const rightTime = Date.parse(right.lastMessage?.sentAt || right.updatedAt || right.createdAt || 0)
+    const leftTime = Date.parse(left.lastMessage?.sentAt || left.updatedAt || left.createdAt || 0)
+    return rightTime - leftTime
+  })
+}
+
 function conversationPreview(message) {
   if (!message) {
     return "Start the conversation."
@@ -106,6 +140,20 @@ function conversationPreview(message) {
   const prefix = isMine(message) ? "You: " : ""
   const body = String(message.body || "").trim()
   return `${prefix}${body}`.slice(0, 72)
+}
+
+function groupChatPreview(group) {
+  if (group?.lastMessage) {
+    const message = group.lastMessage
+    const author = message.senderId === currentUserId.value ? "You" : displayName(message.sender)
+    return `${author}: ${String(message.body || "").trim()}`.slice(0, 72)
+  }
+
+  return `${group?.membersCount || 0} members · ${group?.postsCount || 0} posts`
+}
+
+function groupChatUpdatedAt(group) {
+  return group?.lastMessage?.sentAt || group?.updatedAt || group?.createdAt
 }
 
 function parseGroupInviteMessage(body) {
@@ -189,6 +237,18 @@ function knownConversationUser(userId) {
   )
 }
 
+function knownGroup(groupId) {
+  const normalizedGroupId = String(groupId || "").trim()
+  if (!normalizedGroupId) {
+    return null
+  }
+
+  return (
+    groupChats.value.find((group) => sameConversation(group.id, normalizedGroupId)) ||
+    (sameConversation(activeGroup.value?.id, normalizedGroupId) ? activeGroup.value : null)
+  )
+}
+
 async function clearConversationNotifications(conversationUserId) {
   const normalizedConversationUserId = String(conversationUserId || "").trim()
   if (!normalizedConversationUserId || !isAuthenticated.value || notificationCleanupLoading[normalizedConversationUserId]) {
@@ -244,8 +304,9 @@ const groupedMessageDays = computed(() => {
     const withinGroupWindow = previousMessage
       ? new Date(message.sentAt).getTime() - new Date(previousMessage.sentAt).getTime() <= MESSAGE_GROUP_WINDOW_MS
       : false
+    const sameSender = previousMessage ? previousMessage.senderId === message.senderId : false
 
-    if (currentGroup && currentGroup.mine === mine && withinGroupWindow) {
+    if (currentGroup && currentGroup.mine === mine && sameSender && withinGroupWindow) {
       currentGroup.messages.push(message)
       currentGroup.timeLabel = formatMessageTime(message.sentAt)
       currentGroup.deliveryState = mine ? deliveryState(message) : ""
@@ -303,6 +364,34 @@ function patchConversationSummary(user, message, unreadCount = null) {
   }
 
   conversations.value = sortConversations([nextSummary, ...conversations.value])
+}
+
+function patchGroupChatSummary(groupId, message) {
+  const normalizedGroupId = String(groupId || "").trim()
+  if (!normalizedGroupId || !message) {
+    return
+  }
+
+  const existingGroup = groupChats.value.find((group) => sameConversation(group.id, normalizedGroupId))
+  const nextGroup = {
+    ...(existingGroup || activeGroup.value || { id: normalizedGroupId, title: "Group chat" }),
+    lastMessage: message,
+    updatedAt: message.sentAt
+  }
+
+  if (activeGroup.value?.id === normalizedGroupId) {
+    activeGroup.value = {
+      ...activeGroup.value,
+      lastMessage: message,
+      updatedAt: message.sentAt
+    }
+  }
+
+  groupChats.value = sortGroupChats(
+    existingGroup
+      ? groupChats.value.map((group) => (sameConversation(group.id, normalizedGroupId) ? nextGroup : group))
+      : [nextGroup, ...groupChats.value]
+  )
 }
 
 function applyConversationReadResult(result) {
@@ -470,6 +559,25 @@ function appendRealtimeMessage(conversationUserId, message) {
   }
 }
 
+function appendRealtimeGroupMessage(payload) {
+  const message = normalizeGroupMessage(payload?.message)
+  const groupId = String(payload?.groupId || message?.groupId || "").trim()
+  if (!message?.id || !groupId) {
+    return
+  }
+
+  patchGroupChatSummary(groupId, message)
+
+  if (!sameConversation(activeGroupId.value, groupId)) {
+    return
+  }
+
+  if (!hasMessage(message.id)) {
+    messages.value = [...messages.value, message]
+    void scrollMessagesToBottom()
+  }
+}
+
 function markActiveConversationRead(userId) {
   if (!userId) {
     return
@@ -491,6 +599,7 @@ function markActiveConversationRead(userId) {
 async function loadSidebarData() {
   if (!isAuthenticated.value) {
     conversations.value = []
+    groupChats.value = []
     discoverUsers.value = []
     pageError.value = ""
     return
@@ -500,19 +609,27 @@ async function loadSidebarData() {
   pageError.value = ""
 
   try {
-    const [nextConversations, nextDiscoverUsers] = await Promise.all([
+    const [nextConversations, nextDiscoverUsers, nextGroups] = await Promise.all([
       fetchChatConversations(),
-      fetchDiscoverUsers()
+      fetchDiscoverUsers(),
+      fetchGroups()
     ])
 
     conversations.value = sortConversations(nextConversations)
+    groupChats.value = sortGroupChats(nextGroups.filter((group) => group.isMember))
     discoverUsers.value = nextDiscoverUsers
 
     const userIdFromRoute = routeConversationUserId()
-    if (!userIdFromRoute && nextConversations[0]?.user?.id) {
+    const groupIdFromRoute = routeGroupId()
+    if (!userIdFromRoute && !groupIdFromRoute && nextConversations[0]?.user?.id) {
       await router.replace({
         path: "/chat",
         query: { user: nextConversations[0].user.id }
+      })
+    } else if (!userIdFromRoute && !groupIdFromRoute && nextGroups.find((group) => group.isMember)?.id) {
+      await router.replace({
+        path: "/chat",
+        query: { group: nextGroups.find((group) => group.isMember).id }
       })
     }
   } catch (error) {
@@ -541,12 +658,64 @@ async function loadConversation(userId) {
   historyHasMore.value = false
   activeHistoryRequestId.value = ""
   messages.value = []
+  activeGroup.value = null
   conversationUser.value = knownConversationUser(normalizedUserId)
 
   requestConversationHistory(normalizedUserId, {
     beforeMessageId: "",
     prepend: false
   })
+}
+
+async function loadGroupThread(groupId) {
+  const normalizedGroupId = String(groupId || "").trim()
+
+  if (!normalizedGroupId) {
+    activeGroup.value = null
+    messages.value = []
+    threadError.value = ""
+    historyHasMore.value = false
+    isLoadingHistory.value = false
+    activeHistoryRequestId.value = ""
+    return
+  }
+
+  isLoadingThread.value = true
+  isLoadingHistory.value = false
+  threadError.value = ""
+  historyHasMore.value = false
+  activeHistoryRequestId.value = ""
+  messages.value = []
+  conversationUser.value = null
+  activeGroup.value = knownGroup(normalizedGroupId)
+
+  try {
+    const [group, groupMessages] = await Promise.all([
+      activeGroup.value ? Promise.resolve(activeGroup.value) : fetchGroup(normalizedGroupId),
+      fetchGroupMessages(normalizedGroupId)
+    ])
+
+    if (!sameConversation(activeGroupId.value, normalizedGroupId)) {
+      return
+    }
+
+    activeGroup.value = group
+    replaceMessageHistory(groupMessages)
+    if (groupMessages.length) {
+      patchGroupChatSummary(normalizedGroupId, groupMessages[groupMessages.length - 1])
+    }
+    await scrollMessagesToBottom()
+  } catch (error) {
+    if (isApiError(error, 403)) {
+      threadError.value = "Only group members can open this chat."
+    } else {
+      threadError.value = error instanceof Error ? error.message : "Could not load this group chat."
+    }
+  } finally {
+    if (sameConversation(activeGroupId.value, normalizedGroupId)) {
+      isLoadingThread.value = false
+    }
+  }
 }
 
 async function navigateToConversation(userId) {
@@ -558,6 +727,18 @@ async function navigateToConversation(userId) {
   await router.replace({
     path: "/chat",
     query: { user: normalizedUserId }
+  })
+}
+
+async function navigateToGroupChat(groupId) {
+  const normalizedGroupId = String(groupId || "").trim()
+  if (!normalizedGroupId) {
+    return
+  }
+
+  await router.replace({
+    path: "/chat",
+    query: { group: normalizedGroupId }
   })
 }
 
@@ -676,6 +857,10 @@ function handleHistoryError(payload) {
 }
 
 function handleMessageListScroll() {
+  if (isGroupThread.value) {
+    return
+  }
+
   const container = messageList.value
   if (!container || isLoadingHistory.value || !historyHasMore.value || !activeConversationUserId.value) {
     return
@@ -690,7 +875,7 @@ function handleMessageListScroll() {
 }
 
 async function submitMessage() {
-  if (!activeConversationUserId.value) {
+  if (!activeConversationUserId.value && !activeGroupId.value) {
     return
   }
 
@@ -704,6 +889,18 @@ async function submitMessage() {
   threadError.value = ""
 
   try {
+    if (activeGroupId.value) {
+      const message = await sendGroupMessage(activeGroupId.value, { body })
+      if (!hasMessage(message.id)) {
+        messages.value = [...messages.value, message]
+        void scrollMessagesToBottom()
+      }
+
+      patchGroupChatSummary(activeGroupId.value, message)
+      composer.body = ""
+      return
+    }
+
     const message = await sendPrivateMessage(activeConversationUserId.value, { body })
     if (!hasMessage(message.id)) {
       messages.value = [...messages.value, message]
@@ -738,8 +935,10 @@ watch(
   (userID) => {
     if (!userID) {
       conversations.value = []
+      groupChats.value = []
       discoverUsers.value = []
       conversationUser.value = null
+      activeGroup.value = null
       messages.value = []
       composer.body = ""
       return
@@ -748,20 +947,31 @@ watch(
     void loadSidebarData()
 
     const userIdFromRoute = routeConversationUserId()
+    const groupIdFromRoute = routeGroupId()
     if (userIdFromRoute) {
       void loadConversation(userIdFromRoute)
+    } else if (groupIdFromRoute) {
+      void loadGroupThread(groupIdFromRoute)
     }
   },
   { immediate: true }
 )
 
 watch(
-  () => route.query.user,
-  (queryUser) => {
+  () => [route.query.user, route.query.group],
+  ([queryUser, queryGroup]) => {
     if (!isAuthenticated.value) {
       return
     }
 
+    const groupId = routeGroupId(queryGroup)
+    if (groupId) {
+      realtimeClient.leaveChatView()
+      void loadGroupThread(groupId)
+      return
+    }
+
+    activeGroup.value = null
     void loadConversation(routeConversationUserId(queryUser))
   },
   { immediate: true }
@@ -774,7 +984,7 @@ watch(
       realtimeClient.leaveChatView()
     }
 
-    if (conversationUserId) {
+    if (conversationUserId && !activeGroupId.value) {
       realtimeClient.enterChatView(conversationUserId)
       void clearConversationNotifications(conversationUserId)
     } else {
@@ -801,6 +1011,9 @@ removeRealtimeListeners.push(
   }),
   realtimeClient.on("chat.conversation.read", (event) => {
     applyConversationReadResult(event?.payload)
+  }),
+  realtimeClient.on("group.message.created", (event) => {
+    appendRealtimeGroupMessage(event?.payload)
   })
 )
 
@@ -814,9 +1027,9 @@ onBeforeUnmount(() => {
   <section class="page">
     <div class="panel">
       <p class="eyebrow">Chat</p>
-      <h2>Private conversations in real time</h2>
+      <h2>Messages</h2>
       <p>
-        Persistent threads, live delivery through WebSocket, and read receipts that keep both sides synchronized without leaving the page.
+        Private conversations and member-only group chats stay together in one realtime inbox.
       </p>
     </div>
 
@@ -827,7 +1040,7 @@ onBeforeUnmount(() => {
             <div class="feed-header">
               <div>
                 <p class="eyebrow">Inbox</p>
-                <h3>Conversations</h3>
+                <h3>Private</h3>
               </div>
               <span class="badge badge--neutral">{{ conversations.length }}</span>
             </div>
@@ -877,6 +1090,45 @@ onBeforeUnmount(() => {
           <div class="chat-sidebar__section">
             <div class="feed-header">
               <div>
+                <p class="eyebrow">Groups</p>
+                <h3>Group chats</h3>
+              </div>
+              <span class="badge badge--soft">{{ groupChats.length }}</span>
+            </div>
+
+            <div class="chat-thread-list">
+              <button
+                v-for="group in groupChats"
+                :key="group.id"
+                type="button"
+                class="chat-thread"
+                :class="{ 'chat-thread--active': activeGroupId === group.id }"
+                @click="navigateToGroupChat(group.id)"
+              >
+                <span class="user-avatar user-avatar--small">
+                  <span class="user-avatar__fallback">{{ groupInitials(group) }}</span>
+                </span>
+
+                <span class="chat-thread__content">
+                  <span class="chat-thread__head">
+                    <strong>{{ group.title }}</strong>
+                    <small>{{ formatConversationTime(groupChatUpdatedAt(group)) }}</small>
+                  </span>
+                  <span class="chat-thread__body">
+                    <small>{{ groupChatPreview(group) }}</small>
+                  </span>
+                </span>
+              </button>
+
+              <p v-if="!groupChats.length" class="feed-note">
+                Group chats appear here once you are a member.
+              </p>
+            </div>
+          </div>
+
+          <div class="chat-sidebar__section">
+            <div class="feed-header">
+              <div>
                 <p class="eyebrow">Start</p>
                 <h3>Discover people</h3>
               </div>
@@ -913,12 +1165,25 @@ onBeforeUnmount(() => {
         </aside>
 
         <section class="panel chat-panel">
-          <template v-if="activeConversationUserId && conversationUser">
+          <template v-if="hasSelectedThread">
             <header class="chat-panel__header">
-              <div class="chat-panel__identity">
+              <div v-if="isGroupThread" class="chat-panel__identity">
+                <span class="user-avatar user-avatar--small">
+                  <span class="user-avatar__fallback">{{ groupInitials(activeGroup) }}</span>
+                </span>
+
+                <div>
+                  <h3>{{ activeGroup?.title || "Group chat" }}</h3>
+                  <p class="feed-note">
+                    {{ activeGroup ? `${activeGroup.membersCount || 0} members` : "Loading group chat..." }}
+                  </p>
+                </div>
+              </div>
+
+              <div v-else class="chat-panel__identity">
                 <span class="user-avatar user-avatar--small">
                   <img
-                    v-if="conversationUser.avatarUrl"
+                    v-if="conversationUser?.avatarUrl"
                     :src="conversationUser.avatarUrl"
                     :alt="`${displayName(conversationUser)} avatar`"
                     class="user-avatar__image"
@@ -929,7 +1194,7 @@ onBeforeUnmount(() => {
                 <div>
                   <h3>{{ displayName(conversationUser) }}</h3>
                   <p class="feed-note">
-                    {{ conversationUser.profileVisibility }} profile
+                    {{ conversationUser?.profileVisibility ? `${conversationUser.profileVisibility} profile` : "Loading conversation..." }}
                   </p>
                 </div>
               </div>
@@ -942,9 +1207,11 @@ onBeforeUnmount(() => {
               <p v-if="isLoadingHistory && messages.length" class="chat-history-loading">
                 Loading older messages...
               </p>
-              <p v-if="isLoadingThread" class="feed-note">Loading conversation...</p>
+              <p v-if="isLoadingThread" class="feed-note">
+                {{ isGroupThread ? "Loading group chat..." : "Loading conversation..." }}
+              </p>
               <p v-else-if="!messages.length" class="feed-note">
-                No messages yet. Say hello and start the thread.
+                {{ isGroupThread ? "No group messages yet. Start the member thread." : "No messages yet. Say hello and start the thread." }}
               </p>
 
               <section
@@ -976,7 +1243,10 @@ onBeforeUnmount(() => {
                           'chat-bubble--theirs': !group.mine
                         }"
                       >
-                        <div v-if="messageGroupInvite(message)" class="chat-invite-card">
+                        <small v-if="isGroupThread && !group.mine" class="chat-bubble__sender">
+                          {{ displayName(group.messages[0]?.sender) }}
+                        </small>
+                        <div v-if="!isGroupThread && messageGroupInvite(message)" class="chat-invite-card">
                           <p class="eyebrow">Group invite</p>
                           <strong>{{ messageGroupInvite(message).title }}</strong>
                           <p>
@@ -997,7 +1267,7 @@ onBeforeUnmount(() => {
                     <footer class="chat-cluster__meta">
                       <span>{{ group.timeLabel }}</span>
                       <span
-                        v-if="group.mine"
+                        v-if="group.mine && !isGroupThread"
                         class="chat-checks"
                         :class="`chat-checks--${group.deliveryState}`"
                         :title="group.deliveryState"
@@ -1018,12 +1288,14 @@ onBeforeUnmount(() => {
                   v-model="composer.body"
                   rows="3"
                   maxlength="2000"
-                  placeholder="Write a private message..."
+                  :placeholder="isGroupThread ? 'Write to everyone in this group...' : 'Write a private message...'"
                 ></textarea>
               </label>
 
               <div class="chat-composer__actions">
-                <p class="feed-note">Messages are delivered live through your NEXO realtime channel.</p>
+                <p class="feed-note">
+                  {{ isGroupThread ? "Group messages are visible only to members." : "Messages are delivered live through your NEXO realtime channel." }}
+                </p>
                 <button type="submit" class="button" :disabled="isSendingMessage">
                   {{ isSendingMessage ? "Sending..." : "Send message" }}
                 </button>
@@ -1033,10 +1305,10 @@ onBeforeUnmount(() => {
 
           <template v-else>
             <div class="chat-empty-state">
-              <p class="eyebrow">Private chat</p>
-              <h3>Choose a conversation</h3>
+              <p class="eyebrow">Messages</p>
+              <h3>Choose a thread</h3>
               <p>
-                Open one of the recent threads or start a new conversation from the discover list.
+                Open a private conversation or one of your member group chats.
               </p>
             </div>
           </template>
@@ -1047,7 +1319,7 @@ onBeforeUnmount(() => {
     <div v-else class="panel panel--narrow">
       <p class="eyebrow">Chat</p>
       <h3>Login required</h3>
-      <p>Sign in to unlock private conversations, live delivery, and read receipts.</p>
+      <p>Sign in to unlock private conversations and member-only group chats.</p>
     </div>
   </section>
 </template>
