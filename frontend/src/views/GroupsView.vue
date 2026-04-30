@@ -73,14 +73,17 @@ const groupCommentsLoaded = reactive({})
 const groupCommentErrorByPost = reactive({})
 const groupCommentSubmitting = reactive({})
 const groupCommentForms = reactive({})
+const activeGroupPostSlides = reactive({})
 const eventResponseLoading = reactive({})
 const createForm = reactive({
   title: "",
   description: ""
 })
 const groupPostForm = reactive({
-  body: ""
+  body: "",
+  images: []
 })
+const groupPostPreviews = ref([])
 const groupEventForm = reactive({
   title: "",
   description: "",
@@ -247,6 +250,91 @@ function groupCommentTimestampLabel(comment) {
 
 function commentCountLabel(count) {
   return Number(count || 0) === 1 ? "1 comment" : `${Number(count || 0)} comments`
+}
+
+function normalizedGroupPostMedia(post) {
+  if (post?.media?.length) {
+    return post.media
+  }
+
+  if (post?.imageUrl) {
+    return [
+      {
+        id: `${post.id}-cover`,
+        url: post.imageUrl,
+        sortOrder: 1
+      }
+    ]
+  }
+
+  return []
+}
+
+function currentGroupPostSlide(post) {
+  const media = normalizedGroupPostMedia(post)
+  if (!media.length) {
+    return 0
+  }
+
+  const currentIndex = Number(activeGroupPostSlides[post.id] || 0)
+  return Math.max(0, Math.min(currentIndex, media.length - 1))
+}
+
+function selectedGroupPostMedia(post) {
+  const media = normalizedGroupPostMedia(post)
+  return media[currentGroupPostSlide(post)] || null
+}
+
+function setGroupPostSlide(post, index) {
+  const media = normalizedGroupPostMedia(post)
+  if (!post?.id || !media.length) {
+    return
+  }
+
+  activeGroupPostSlides[post.id] = Math.max(0, Math.min(index, media.length - 1))
+}
+
+function previousGroupPostSlide(post) {
+  const media = normalizedGroupPostMedia(post)
+  if (!media.length) {
+    return
+  }
+
+  setGroupPostSlide(post, currentGroupPostSlide(post) - 1)
+}
+
+function nextGroupPostSlide(post) {
+  const media = normalizedGroupPostMedia(post)
+  if (!media.length) {
+    return
+  }
+
+  setGroupPostSlide(post, currentGroupPostSlide(post) + 1)
+}
+
+function revokeGroupPostPreviewURLs() {
+  groupPostPreviews.value.forEach((preview) => URL.revokeObjectURL(preview.url))
+}
+
+function syncGroupPostPreviews(files) {
+  revokeGroupPostPreviewURLs()
+  groupPostPreviews.value = files.map((file) => ({
+    name: file.name,
+    url: URL.createObjectURL(file)
+  }))
+}
+
+function resetGroupPostComposer() {
+  groupPostForm.body = ""
+  groupPostForm.images = []
+  revokeGroupPostPreviewURLs()
+  groupPostPreviews.value = []
+}
+
+function handleGroupPostImageSelection(event) {
+  const files = Array.from(event.target.files || [])
+  groupPostForm.images = files
+  syncGroupPostPreviews(files)
 }
 
 function selectSidebarSection(sectionId) {
@@ -424,6 +512,7 @@ function clearGroupPostsState({ clearComposer = true } = {}) {
   groupPostsError.value = ""
   createGroupPostError.value = ""
   isLoadingGroupPosts.value = false
+  clearReactiveMap(activeGroupPostSlides)
   clearReactiveMap(groupCommentsExpanded)
   clearReactiveMap(groupCommentsByPost)
   clearReactiveMap(groupCommentsLoading)
@@ -433,7 +522,7 @@ function clearGroupPostsState({ clearComposer = true } = {}) {
   clearReactiveMap(groupCommentForms)
 
   if (clearComposer) {
-    groupPostForm.body = ""
+    resetGroupPostComposer()
   }
 }
 
@@ -830,18 +919,21 @@ async function handleCreateGroupPost() {
 
   try {
     const createdPost = await createGroupPost(normalizedGroupId, {
-      body: groupPostForm.body
+      body: groupPostForm.body,
+      images: groupPostForm.images
     })
 
     groupPosts.value = [createdPost, ...groupPosts.value.filter((post) => post.id !== createdPost.id)]
     ensureGroupCommentState(createdPost.id)
-    groupPostForm.body = ""
+    setGroupPostSlide(createdPost, 0)
+    resetGroupPostComposer()
     bumpGroupPostsCount(normalizedGroupId, 1)
-    activeSidebarSection.value = "create-post"
+    closeSidebarModal()
   } catch (error) {
     if (isApiError(error)) {
       createGroupPostError.value =
         error.payload?.fields?.body ||
+        error.payload?.fields?.images ||
         error.message
     } else {
       createGroupPostError.value = "Could not publish in this group right now."
@@ -912,7 +1004,7 @@ async function handleCreateGroupEvent() {
     groupEventForm.description = ""
     groupEventForm.startsAtLocal = ""
     bumpGroupEventsCount(normalizedGroupId, 1)
-    activeSidebarSection.value = "events"
+    closeSidebarModal()
   } catch (error) {
     if (isApiError(error)) {
       createGroupEventError.value =
@@ -1079,6 +1171,8 @@ onBeforeUnmount(() => {
   if (typeof document !== "undefined") {
     document.body.style.overflow = previousBodyOverflow.value
   }
+
+  revokeGroupPostPreviewURLs()
 })
 
 watch(
@@ -1200,8 +1294,49 @@ watch(
               </header>
 
               <div class="post-card__body">
-                <p>{{ post.body }}</p>
-                <img v-if="post.imageUrl" :src="post.imageUrl" alt="" class="group-post-card__image" />
+                <p v-if="post.body">{{ post.body }}</p>
+
+                <div v-if="normalizedGroupPostMedia(post).length" class="carousel group-post-card__carousel">
+                  <div class="carousel__frame">
+                    <img
+                      :src="selectedGroupPostMedia(post)?.url"
+                      :alt="post.body || `${displayName(post.author)} group post image`"
+                      class="group-post-card__image carousel__image"
+                    />
+                  </div>
+
+                  <div v-if="normalizedGroupPostMedia(post).length > 1" class="carousel__controls">
+                    <button
+                      type="button"
+                      class="button button--ghost button--small"
+                      :disabled="currentGroupPostSlide(post) === 0"
+                      @click="previousGroupPostSlide(post)"
+                    >
+                      Previous
+                    </button>
+
+                    <div class="carousel__dots">
+                      <button
+                        v-for="(media, index) in normalizedGroupPostMedia(post)"
+                        :key="media.id"
+                        type="button"
+                        class="carousel__dot"
+                        :class="{ 'carousel__dot--active': index === currentGroupPostSlide(post) }"
+                        :aria-label="`View group image ${index + 1}`"
+                        @click="setGroupPostSlide(post, index)"
+                      ></button>
+                    </div>
+
+                    <button
+                      type="button"
+                      class="button button--ghost button--small"
+                      :disabled="currentGroupPostSlide(post) >= normalizedGroupPostMedia(post).length - 1"
+                      @click="nextGroupPostSlide(post)"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <div class="group-post-card__actions">
@@ -1414,12 +1549,28 @@ watch(
                     v-model.trim="groupPostForm.body"
                     rows="5"
                     maxlength="4000"
-                    placeholder="Share an update, ask for feedback, or kick off the next thread for this group."
+                    placeholder="Share an update, ask for feedback, or post images from inside this group."
                   ></textarea>
                 </label>
 
+                <label>
+                  <span>Images</span>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    multiple
+                    @change="handleGroupPostImageSelection"
+                  />
+                </label>
+
+                <div v-if="groupPostPreviews.length" class="preview-strip">
+                  <figure v-for="preview in groupPostPreviews" :key="preview.url" class="preview-strip__item">
+                    <img :src="preview.url" :alt="preview.name" />
+                  </figure>
+                </div>
+
                 <div class="profile-form__actions">
-                  <p class="feed-note">Only members can read and publish inside this internal timeline.</p>
+                  <p class="feed-note">Only members can read this timeline. Images are optimized automatically and you can attach up to 6.</p>
                   <button type="submit" class="button" :disabled="isCreatingGroupPost">
                     {{ isCreatingGroupPost ? "Publishing..." : "Publish in group" }}
                   </button>

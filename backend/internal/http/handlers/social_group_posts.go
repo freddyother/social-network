@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"mime/multipart"
 	stdlibhttp "net/http"
 	"strings"
 
@@ -31,12 +32,28 @@ func (h SocialHandler) HandleCreateGroupPost(w stdlibhttp.ResponseWriter, r *std
 		return
 	}
 
-	var payload struct {
-		Body string `json:"body"`
-	}
-	if err := decodeJSON(r, &payload); err != nil {
-		writeError(w, stdlibhttp.StatusBadRequest, err.Error(), nil)
-		return
+	var (
+		payload struct {
+			Body string `json:"body"`
+		}
+		images []*multipart.FileHeader
+	)
+
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		if err := r.ParseMultipartForm(64 << 20); err != nil {
+			writeError(w, stdlibhttp.StatusBadRequest, "Group post form data is invalid.", nil)
+			return
+		}
+
+		payload.Body = r.FormValue("body")
+		if r.MultipartForm != nil {
+			images = r.MultipartForm.File["images"]
+		}
+	} else {
+		if err := decodeJSON(r, &payload); err != nil {
+			writeError(w, stdlibhttp.StatusBadRequest, err.Error(), nil)
+			return
+		}
 	}
 
 	post, err := h.service.CreateGroupPost(
@@ -44,7 +61,8 @@ func (h SocialHandler) HandleCreateGroupPost(w stdlibhttp.ResponseWriter, r *std
 		*currentUser,
 		strings.TrimSpace(r.PathValue("groupID")),
 		social.CreateGroupPostInput{
-			Body: payload.Body,
+			Body:   payload.Body,
+			Images: images,
 		},
 	)
 	if err != nil {

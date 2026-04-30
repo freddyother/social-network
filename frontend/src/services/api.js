@@ -80,6 +80,10 @@ function normalizeGroupPost(post) {
   return {
     ...post,
     imageUrl: resolveUploadUrl(post.imageUrl),
+    media: (post.media || []).map((item) => ({
+      ...item,
+      url: resolveUploadUrl(item.url)
+    })),
     author: normalizeUser(post.author)
   }
 }
@@ -291,9 +295,16 @@ export async function fetchGroupPosts(groupId) {
 }
 
 export async function createGroupPost(groupId, post) {
+  const formData = new FormData()
+  formData.set("body", post.body || "")
+
+  for (const image of post.images || []) {
+    formData.append("images", image)
+  }
+
   const payload = await request(`/groups/${groupId}/posts`, {
     method: "POST",
-    body: JSON.stringify(post)
+    body: formData
   })
 
   return normalizeGroupPost(payload?.post || null)

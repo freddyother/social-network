@@ -1097,6 +1097,17 @@ select {
   object-fit: cover;
 }
 
+.group-post-card__carousel {
+  margin-top: 0.85rem;
+}
+
+.group-post-card__carousel .group-post-card__image {
+  max-height: min(62vh, 680px);
+  border: none;
+  border-radius: 0;
+  object-fit: contain;
+}
+
 .chat-invite-card {
   display: grid;
   justify-items: start;
