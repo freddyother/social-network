@@ -1253,7 +1253,6 @@ watch(
                       <span class="badge">{{ post.privacy }}</span>
                       <span class="badge badge--soft">{{ post.author.profileVisibility }}</span>
                       <span class="badge badge--neutral">{{ commentCountLabel(post.commentsCount || 0) }}</span>
-                      <span class="badge badge--neutral">{{ reactionCountLabel(post.reactionsCount || 0) }}</span>
                     </p>
                   </template>
                 </div>
@@ -1746,7 +1745,6 @@ watch(
               <div class="post-modal__meta">
                 <span class="badge">{{ selectedPost.privacy }}</span>
                 <span class="badge badge--neutral">{{ commentCountLabel(selectedPost.commentsCount || 0) }}</span>
-                <span class="badge badge--neutral">{{ reactionCountLabel(selectedPost.reactionsCount || 0) }}</span>
               </div>
 
               <div class="reaction-bar reaction-bar--modal">

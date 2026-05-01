@@ -1518,7 +1518,6 @@ watch(
                       <p class="post-card__meta">
                         <span>{{ groupPostTimestampLabel(post) }}</span>
                         <span class="badge badge--neutral">{{ commentCountLabel(post.commentsCount) }}</span>
-                        <span class="badge badge--neutral">{{ reactionCountLabel(post.reactionsCount || 0) }}</span>
                       </p>
                     </div>
                   </div>
