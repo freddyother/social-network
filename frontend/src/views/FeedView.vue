@@ -118,7 +118,7 @@ function commentCountLabel(count) {
 }
 
 function reactionCountLabel(count) {
-  return Number(count || 0) === 1 ? "1 like" : `${Number(count || 0)} likes`
+  return String(Number(count || 0))
 }
 
 function reactionKey(type, id) {
@@ -1341,14 +1341,14 @@ watch(
                     class="reaction-button"
                     :class="{ 'reaction-button--active': hasViewerReaction(post) }"
                     :aria-pressed="hasViewerReaction(post)"
+                    :aria-label="hasViewerReaction(post) ? 'Remove reaction from post' : 'React to post'"
                     :disabled="reactionLoading[reactionKey('post', post.id)]"
                     @click="togglePostReaction(post)"
                   >
                     <Heart :size="16" :fill="hasViewerReaction(post) ? 'currentColor' : 'none'" aria-hidden="true" />
-                    <span>{{ hasViewerReaction(post) ? "Liked" : "Like" }}</span>
                   </button>
                   <span v-if="post.reactionsCount" class="reaction-popover" role="tooltip">
-                    <strong>Liked by</strong>
+                    <strong>People</strong>
                     <span v-for="user in reactionUsers(post)" :key="user.id">{{ displayName(user) }}</span>
                     <span v-if="reactionOverflowCount(post)">and {{ reactionOverflowCount(post) }} more</span>
                   </span>
@@ -1447,14 +1447,17 @@ watch(
                             class="reaction-icon-button"
                             :class="{ 'reaction-icon-button--active': hasViewerReaction(comment) }"
                             :aria-pressed="hasViewerReaction(comment)"
-                            :aria-label="hasViewerReaction(comment) ? 'Unlike comment' : 'Like comment'"
+                            :aria-label="hasViewerReaction(comment) ? 'Remove reaction from comment' : 'React to comment'"
                             :disabled="reactionLoading[reactionKey('comment', `${post.id}:${comment.id}`)]"
                             @click="toggleCommentReaction(post.id, comment)"
                           >
                             <Heart :size="16" :fill="hasViewerReaction(comment) ? 'currentColor' : 'none'" aria-hidden="true" />
                           </button>
+                          <span v-if="comment.reactionsCount" class="comment-card__likes">
+                            {{ reactionCountLabel(comment.reactionsCount || 0) }}
+                          </span>
                           <span v-if="comment.reactionsCount" class="reaction-popover reaction-popover--right" role="tooltip">
-                            <strong>Liked by</strong>
+                            <strong>People</strong>
                             <span v-for="user in reactionUsers(comment)" :key="user.id">{{ displayName(user) }}</span>
                             <span v-if="reactionOverflowCount(comment)">and {{ reactionOverflowCount(comment) }} more</span>
                           </span>
@@ -1463,9 +1466,6 @@ watch(
 
                       <div class="comment-card__actions">
                         <div class="comment-card__meta-line">
-                          <span v-if="comment.reactionsCount" class="comment-card__likes">
-                            {{ reactionCountLabel(comment.reactionsCount || 0) }}
-                          </span>
                           <button
                             type="button"
                             class="comment-card__text-action"
@@ -1571,26 +1571,21 @@ watch(
                                 class="reaction-icon-button"
                                 :class="{ 'reaction-icon-button--active': hasViewerReaction(reply) }"
                                 :aria-pressed="hasViewerReaction(reply)"
-                                :aria-label="hasViewerReaction(reply) ? 'Unlike reply' : 'Like reply'"
+                                :aria-label="hasViewerReaction(reply) ? 'Remove reaction from reply' : 'React to reply'"
                                 :disabled="reactionLoading[reactionKey('comment', `${post.id}:${reply.id}`)]"
                                 @click="toggleCommentReaction(post.id, reply)"
                               >
                                 <Heart :size="16" :fill="hasViewerReaction(reply) ? 'currentColor' : 'none'" aria-hidden="true" />
                               </button>
+                              <span v-if="reply.reactionsCount" class="comment-card__likes">
+                                {{ reactionCountLabel(reply.reactionsCount || 0) }}
+                              </span>
                               <span v-if="reply.reactionsCount" class="reaction-popover reaction-popover--right" role="tooltip">
-                                <strong>Liked by</strong>
+                                <strong>People</strong>
                                 <span v-for="user in reactionUsers(reply)" :key="user.id">{{ displayName(user) }}</span>
                                 <span v-if="reactionOverflowCount(reply)">and {{ reactionOverflowCount(reply) }} more</span>
                               </span>
                             </span>
-                          </div>
-
-                          <div class="comment-card__actions">
-                            <div class="comment-card__meta-line">
-                              <span v-if="reply.reactionsCount" class="comment-card__likes">
-                                {{ reactionCountLabel(reply.reactionsCount || 0) }}
-                              </span>
-                            </div>
                           </div>
                         </article>
                       </div>
@@ -1735,14 +1730,14 @@ watch(
                     class="reaction-button"
                     :class="{ 'reaction-button--active': hasViewerReaction(selectedPost) }"
                     :aria-pressed="hasViewerReaction(selectedPost)"
+                    :aria-label="hasViewerReaction(selectedPost) ? 'Remove reaction from post' : 'React to post'"
                     :disabled="reactionLoading[reactionKey('post', selectedPost.id)]"
                     @click="togglePostReaction(selectedPost)"
                   >
                     <Heart :size="16" :fill="hasViewerReaction(selectedPost) ? 'currentColor' : 'none'" aria-hidden="true" />
-                    <span>{{ hasViewerReaction(selectedPost) ? "Liked" : "Like" }}</span>
                   </button>
                   <span v-if="selectedPost.reactionsCount" class="reaction-popover" role="tooltip">
-                    <strong>Liked by</strong>
+                    <strong>People</strong>
                     <span v-for="user in reactionUsers(selectedPost)" :key="user.id">{{ displayName(user) }}</span>
                     <span v-if="reactionOverflowCount(selectedPost)">and {{ reactionOverflowCount(selectedPost) }} more</span>
                   </span>
@@ -1861,26 +1856,21 @@ watch(
                         class="reaction-icon-button"
                         :class="{ 'reaction-icon-button--active': hasViewerReaction(comment) }"
                         :aria-pressed="hasViewerReaction(comment)"
-                        :aria-label="hasViewerReaction(comment) ? 'Unlike comment' : 'Like comment'"
+                        :aria-label="hasViewerReaction(comment) ? 'Remove reaction from comment' : 'React to comment'"
                         :disabled="reactionLoading[reactionKey('comment', `${selectedPost.id}:${comment.id}`)]"
                         @click="toggleCommentReaction(selectedPost.id, comment)"
                       >
                         <Heart :size="16" :fill="hasViewerReaction(comment) ? 'currentColor' : 'none'" aria-hidden="true" />
                       </button>
+                      <span v-if="comment.reactionsCount" class="comment-card__likes">
+                        {{ reactionCountLabel(comment.reactionsCount || 0) }}
+                      </span>
                       <span v-if="comment.reactionsCount" class="reaction-popover reaction-popover--right" role="tooltip">
-                        <strong>Liked by</strong>
+                        <strong>People</strong>
                         <span v-for="user in reactionUsers(comment)" :key="user.id">{{ displayName(user) }}</span>
                         <span v-if="reactionOverflowCount(comment)">and {{ reactionOverflowCount(comment) }} more</span>
                       </span>
                     </span>
-                  </div>
-
-                  <div class="comment-card__actions">
-                    <div class="comment-card__meta-line">
-                      <span v-if="comment.reactionsCount" class="comment-card__likes">
-                        {{ reactionCountLabel(comment.reactionsCount || 0) }}
-                      </span>
-                    </div>
                   </div>
 
                   <div v-if="comment.replies?.length" class="reply-stack">
@@ -1904,26 +1894,21 @@ watch(
                             class="reaction-icon-button"
                             :class="{ 'reaction-icon-button--active': hasViewerReaction(reply) }"
                             :aria-pressed="hasViewerReaction(reply)"
-                            :aria-label="hasViewerReaction(reply) ? 'Unlike reply' : 'Like reply'"
+                            :aria-label="hasViewerReaction(reply) ? 'Remove reaction from reply' : 'React to reply'"
                             :disabled="reactionLoading[reactionKey('comment', `${selectedPost.id}:${reply.id}`)]"
                             @click="toggleCommentReaction(selectedPost.id, reply)"
                           >
                             <Heart :size="16" :fill="hasViewerReaction(reply) ? 'currentColor' : 'none'" aria-hidden="true" />
                           </button>
+                          <span v-if="reply.reactionsCount" class="comment-card__likes">
+                            {{ reactionCountLabel(reply.reactionsCount || 0) }}
+                          </span>
                           <span v-if="reply.reactionsCount" class="reaction-popover reaction-popover--right" role="tooltip">
-                            <strong>Liked by</strong>
+                            <strong>People</strong>
                             <span v-for="user in reactionUsers(reply)" :key="user.id">{{ displayName(user) }}</span>
                             <span v-if="reactionOverflowCount(reply)">and {{ reactionOverflowCount(reply) }} more</span>
                           </span>
                         </span>
-                      </div>
-
-                      <div class="comment-card__actions">
-                        <div class="comment-card__meta-line">
-                          <span v-if="reply.reactionsCount" class="comment-card__likes">
-                            {{ reactionCountLabel(reply.reactionsCount || 0) }}
-                          </span>
-                        </div>
                       </div>
                     </article>
                   </div>

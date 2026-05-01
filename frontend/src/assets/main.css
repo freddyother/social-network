@@ -603,14 +603,16 @@ select {
   position: relative;
   display: inline-flex;
   align-items: center;
+  gap: 0.25rem;
 }
 
 .reaction-button {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  justify-content: center;
+  width: 2.35rem;
   min-height: 2.35rem;
-  padding: 0.55rem 0.85rem;
+  padding: 0;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--header-chip-bg);
@@ -1963,6 +1965,7 @@ label {
   color: var(--muted);
   font-size: 0.86rem;
   font-weight: 800;
+  line-height: 1;
 }
 
 .comment-card__text-action {
