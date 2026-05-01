@@ -811,6 +811,12 @@ select {
   gap: 1rem;
 }
 
+.post-card--target,
+.comment-card--target {
+  border-color: rgba(237, 73, 86, 0.68);
+  box-shadow: 0 0 0 3px rgba(237, 73, 86, 0.12);
+}
+
 .post-card__header {
   display: flex;
   justify-content: space-between;
@@ -1993,6 +1999,15 @@ label {
   border: 1px solid var(--line);
   border-radius: 20px;
   background: var(--notification-card-bg);
+}
+
+.notification-card--clickable {
+  cursor: pointer;
+}
+
+.notification-card--clickable:hover,
+.notification-card--clickable:focus-visible {
+  border-color: rgba(237, 73, 86, 0.42);
 }
 
 .notification-card--unread {

@@ -1,7 +1,7 @@
 <script setup>
 import { Heart } from "lucide-vue-next"
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
-import { useRouter } from "vue-router"
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
+import { useRoute, useRouter } from "vue-router"
 
 import {
   acceptGroupJoinRequest,
@@ -37,6 +37,7 @@ const props = defineProps({
 })
 
 const store = useAppStore()
+const route = useRoute()
 const router = useRouter()
 
 const isAuthenticated = computed(() => Boolean(store.state.currentUser))
@@ -282,6 +283,41 @@ function reactionUsers(target) {
 
 function reactionOverflowCount(target) {
   return Math.max(0, Number(target?.reactionsCount || 0) - reactionUsers(target).length)
+}
+
+function routeGroupPostId() {
+  const rawValue = route.query.post
+  if (Array.isArray(rawValue)) {
+    return String(rawValue[0] || "").trim()
+  }
+
+  return typeof rawValue === "string" ? rawValue.trim() : ""
+}
+
+function routeGroupCommentId() {
+  const rawValue = route.query.comment
+  if (Array.isArray(rawValue)) {
+    return String(rawValue[0] || "").trim()
+  }
+
+  return typeof rawValue === "string" ? rawValue.trim() : ""
+}
+
+function shouldOpenGroupCommentsFromRoute() {
+  const rawValue = route.query.comments
+  if (Array.isArray(rawValue)) {
+    return rawValue.includes("1")
+  }
+
+  return String(rawValue || "").trim() === "1"
+}
+
+function isRouteGroupPost(post) {
+  return Boolean(post?.id && routeGroupPostId() === post.id && !routeGroupCommentId())
+}
+
+function isRouteGroupComment(comment) {
+  return Boolean(comment?.id && routeGroupCommentId() === comment.id)
 }
 
 function normalizedGroupPostMedia(post) {
@@ -796,6 +832,7 @@ async function loadGroupPosts(groupId) {
     for (const post of loadedPosts) {
       ensureGroupCommentState(post.id)
     }
+    await focusGroupTargetFromRoute()
   } catch (error) {
     if (requestToken !== groupPostsRequestToken) {
       return
@@ -908,6 +945,42 @@ async function toggleGroupComments(post) {
   if (groupCommentsExpanded[postId] && !groupCommentsLoaded[postId]) {
     await loadGroupComments(post)
   }
+}
+
+async function focusGroupTargetFromRoute() {
+  if (!isAuthenticated.value || !selectedGroup.value?.id) {
+    return
+  }
+
+  const targetPostId = routeGroupPostId()
+  if (!targetPostId) {
+    return
+  }
+
+  const targetPost = groupPosts.value.find((post) => post.id === targetPostId)
+  if (!targetPost) {
+    return
+  }
+
+  const targetCommentId = routeGroupCommentId()
+  if (targetCommentId || shouldOpenGroupCommentsFromRoute()) {
+    ensureGroupCommentState(targetPost.id)
+    groupCommentsExpanded[targetPost.id] = true
+
+    if (!groupCommentsLoaded[targetPost.id]) {
+      await loadGroupComments(targetPost)
+    }
+  }
+
+  await nextTick()
+  const targetElement = targetCommentId
+    ? document.getElementById(`group-comment-${targetCommentId}`)
+    : document.getElementById(`group-post-${targetPost.id}`)
+
+  targetElement?.scrollIntoView({
+    behavior: "smooth",
+    block: targetCommentId ? "center" : "start"
+  })
 }
 
 async function handleCreateGroup() {
@@ -1297,6 +1370,13 @@ watch(
 )
 
 watch(
+  () => [route.query.post, route.query.comments, route.query.comment, groupPosts.value.length],
+  () => {
+    void focusGroupTargetFromRoute()
+  }
+)
+
+watch(
   () => sidebarCards.value.map((card) => card.id).join("|"),
   (value) => {
     const availableIds = value ? value.split("|").filter((id) => id && id !== "chat") : []
@@ -1412,7 +1492,13 @@ watch(
           <p v-else-if="groupPostsError" class="form-error">{{ groupPostsError }}</p>
 
           <div v-else-if="groupPosts.length" class="groups-main-feed__stack">
-            <article v-for="post in groupPosts" :key="post.id" class="panel post-card">
+            <article
+              v-for="post in groupPosts"
+              :id="`group-post-${post.id}`"
+              :key="post.id"
+              class="panel post-card"
+              :class="{ 'post-card--target': isRouteGroupPost(post) }"
+            >
               <header class="post-card__header">
                 <div class="post-card__header-main">
                   <div class="groups-main-feed__author">
@@ -1533,7 +1619,13 @@ watch(
                 <p v-if="groupCommentErrorByPost[post.id]" class="form-error">{{ groupCommentErrorByPost[post.id] }}</p>
 
                 <div v-if="(groupCommentsByPost[post.id] || []).length" class="comment-thread">
-                  <article v-for="comment in groupCommentsByPost[post.id]" :key="comment.id" class="comment-card">
+                  <article
+                    v-for="comment in groupCommentsByPost[post.id]"
+                    :id="`group-comment-${comment.id}`"
+                    :key="comment.id"
+                    class="comment-card"
+                    :class="{ 'comment-card--target': isRouteGroupComment(comment) }"
+                  >
                     <div class="comment-card__header">
                       <div class="comment-card__header-main">
                         <strong>{{ displayName(comment.author) }}</strong>

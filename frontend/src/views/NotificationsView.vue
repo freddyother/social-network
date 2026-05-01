@@ -25,6 +25,10 @@ function typeLabel(type) {
   return type.replaceAll("_", " ")
 }
 
+function notificationMetadata(notification) {
+  return notification?.metadata && typeof notification.metadata === "object" ? notification.metadata : {}
+}
+
 async function loadNotificationsInbox() {
   if (!isAuthenticated.value) {
     notifications.value = []
@@ -82,6 +86,8 @@ function notificationTarget(notification) {
     return null
   }
 
+  const metadata = notificationMetadata(notification)
+
   if (notification.entityType === "conversation" && notification.entityId) {
     return {
       path: "/chat",
@@ -90,9 +96,45 @@ function notificationTarget(notification) {
   }
 
   if (notification.entityType === "post" && notification.entityId) {
+    const query = { post: notification.entityId }
+    if (notification.type === "post_comment" || notification.type === "comment_reply") {
+      query.comments = "1"
+    }
+
     return {
       path: "/feed",
-      query: { post: notification.entityId, comments: "1" }
+      query
+    }
+  }
+
+  if (notification.entityType === "comment" && metadata.postId && (metadata.commentId || notification.entityId)) {
+    return {
+      path: "/feed",
+      query: {
+        post: metadata.postId,
+        comments: "1",
+        comment: metadata.commentId || notification.entityId
+      }
+    }
+  }
+
+  if (notification.entityType === "group_post" && metadata.groupId && (metadata.groupPostId || notification.entityId)) {
+    return {
+      path: `/groups/${encodeURIComponent(metadata.groupId)}`,
+      query: {
+        post: metadata.groupPostId || notification.entityId
+      }
+    }
+  }
+
+  if (notification.entityType === "group_comment" && metadata.groupId && (metadata.groupPostId || notification.entityId)) {
+    return {
+      path: `/groups/${encodeURIComponent(metadata.groupId)}`,
+      query: {
+        post: metadata.groupPostId || "",
+        comments: "1",
+        comment: metadata.commentId || notification.entityId
+      }
     }
   }
 
@@ -125,6 +167,18 @@ function notificationActionLabel(notification) {
 
   if (notification?.entityType === "post") {
     return "Open post"
+  }
+
+  if (notification?.entityType === "comment") {
+    return "Open comment"
+  }
+
+  if (notification?.entityType === "group_post") {
+    return "Open group post"
+  }
+
+  if (notification?.entityType === "group_comment") {
+    return "Open group comment"
   }
 
   if (notification?.entityType === "group") {
@@ -239,7 +293,15 @@ onBeforeUnmount(() => {
             v-for="notification in notifications"
             :key="notification.id"
             class="notification-card"
-            :class="{ 'notification-card--unread': !notification.isRead }"
+            :class="{
+              'notification-card--unread': !notification.isRead,
+              'notification-card--clickable': notificationTarget(notification)
+            }"
+            :role="notificationTarget(notification) ? 'button' : undefined"
+            :tabindex="notificationTarget(notification) ? 0 : undefined"
+            @click="openNotification(notification)"
+            @keydown.enter.prevent="openNotification(notification)"
+            @keydown.space.prevent="openNotification(notification)"
           >
             <div class="notification-card__content">
               <div class="notification-card__meta">
@@ -253,7 +315,7 @@ onBeforeUnmount(() => {
                 v-if="notificationTarget(notification)"
                 type="button"
                 class="notification-card__link notification-card__link-button"
-                @click="openNotification(notification)"
+                @click.stop="openNotification(notification)"
               >
                 {{ notificationActionLabel(notification) }}
               </button>
@@ -264,7 +326,7 @@ onBeforeUnmount(() => {
               type="button"
               class="button button--ghost button--small"
               :disabled="readLoading[notification.id]"
-              @click="handleMarkRead(notification.id)"
+              @click.stop="handleMarkRead(notification.id)"
             >
               {{ readLoading[notification.id] ? "Saving..." : "Mark as read" }}
             </button>

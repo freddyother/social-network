@@ -3,6 +3,7 @@ package social
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -39,14 +40,15 @@ type Comment struct {
 }
 
 type Notification struct {
-	ID         string    `json:"id"`
-	Type       string    `json:"type"`
-	Title      string    `json:"title"`
-	Body       string    `json:"body"`
-	EntityType string    `json:"entityType,omitempty"`
-	EntityID   string    `json:"entityId,omitempty"`
-	IsRead     bool      `json:"isRead"`
-	CreatedAt  time.Time `json:"createdAt"`
+	ID         string            `json:"id"`
+	Type       string            `json:"type"`
+	Title      string            `json:"title"`
+	Body       string            `json:"body"`
+	EntityType string            `json:"entityType,omitempty"`
+	EntityID   string            `json:"entityId,omitempty"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
+	IsRead     bool              `json:"isRead"`
+	CreatedAt  time.Time         `json:"createdAt"`
 }
 
 type sqlReader interface {
@@ -468,7 +470,7 @@ func (s Service) Notifications(ctx context.Context, userID string) ([]Notificati
 	rows, err := s.db.QueryContext(
 		ctx,
 		`
-			SELECT id, type, title, body, entity_type, entity_id, is_read, created_at
+			SELECT id, type, title, body, entity_type, entity_id, COALESCE(metadata, '{}'::jsonb)::TEXT, is_read, created_at
 			FROM notifications
 			WHERE user_id = $1
 			ORDER BY created_at DESC
@@ -486,6 +488,7 @@ func (s Service) Notifications(ctx context.Context, userID string) ([]Notificati
 		var item Notification
 		var entityType sql.NullString
 		var entityID sql.NullString
+		var metadataJSON string
 		if err := rows.Scan(
 			&item.ID,
 			&item.Type,
@@ -493,6 +496,7 @@ func (s Service) Notifications(ctx context.Context, userID string) ([]Notificati
 			&item.Body,
 			&entityType,
 			&entityID,
+			&metadataJSON,
 			&item.IsRead,
 			&item.CreatedAt,
 		); err != nil {
@@ -501,6 +505,7 @@ func (s Service) Notifications(ctx context.Context, userID string) ([]Notificati
 
 		item.EntityType = nullStringValue(entityType)
 		item.EntityID = nullStringValue(entityID)
+		item.Metadata = decodeNotificationMetadata(metadataJSON)
 		notifications = append(notifications, item)
 	}
 
@@ -662,7 +667,7 @@ func (s Service) loadUserIdentity(ctx context.Context, reader sqlReader, userID 
 	return user, nil
 }
 
-func (s Service) insertNotification(ctx context.Context, executor sqlExecutor, userID, notificationType, title, body, entityType, entityID string) (Notification, error) {
+func (s Service) insertNotification(ctx context.Context, executor sqlExecutor, userID, notificationType, title, body, entityType, entityID string, metadataValues ...map[string]string) (Notification, error) {
 	if strings.TrimSpace(userID) == "" {
 		return Notification{}, nil
 	}
@@ -682,12 +687,18 @@ func (s Service) insertNotification(ctx context.Context, executor sqlExecutor, u
 		entityIDValue = trimmed
 	}
 
+	metadata := normalizeNotificationMetadata(metadataValues...)
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return Notification{}, fmt.Errorf("encode notification metadata: %w", err)
+	}
+
 	var createdAt time.Time
 	if err := executor.QueryRowContext(
 		ctx,
 		`
-			INSERT INTO notifications (id, user_id, type, title, body, entity_type, entity_id, is_read, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE, NOW())
+			INSERT INTO notifications (id, user_id, type, title, body, entity_type, entity_id, metadata, is_read, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, FALSE, NOW())
 			RETURNING created_at
 		`,
 		notificationID,
@@ -697,6 +708,7 @@ func (s Service) insertNotification(ctx context.Context, executor sqlExecutor, u
 		body,
 		entityTypeValue,
 		entityIDValue,
+		string(metadataJSON),
 	).Scan(&createdAt); err != nil {
 		return Notification{}, fmt.Errorf("insert notification: %w", err)
 	}
@@ -708,9 +720,40 @@ func (s Service) insertNotification(ctx context.Context, executor sqlExecutor, u
 		Body:       body,
 		EntityType: strings.TrimSpace(entityType),
 		EntityID:   strings.TrimSpace(entityID),
+		Metadata:   metadata,
 		IsRead:     false,
 		CreatedAt:  createdAt,
 	}, nil
+}
+
+func normalizeNotificationMetadata(metadataValues ...map[string]string) map[string]string {
+	metadata := make(map[string]string)
+	for _, values := range metadataValues {
+		for key, value := range values {
+			trimmedKey := strings.TrimSpace(key)
+			trimmedValue := strings.TrimSpace(value)
+			if trimmedKey == "" || trimmedValue == "" {
+				continue
+			}
+
+			metadata[trimmedKey] = trimmedValue
+		}
+	}
+
+	return metadata
+}
+
+func decodeNotificationMetadata(raw string) map[string]string {
+	metadata := make(map[string]string)
+	if strings.TrimSpace(raw) == "" {
+		return metadata
+	}
+
+	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+		return map[string]string{}
+	}
+
+	return normalizeNotificationMetadata(metadata)
 }
 
 func (s Service) loadCommentEditorState(ctx context.Context, reader sqlReader, postID, commentID string) (editableComment, error) {

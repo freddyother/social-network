@@ -62,6 +62,28 @@ type reactionTargetConfig struct {
 	TargetColumn string
 }
 
+type reactionNotification struct {
+	RecipientID string
+	Type        string
+	Title       string
+	Body        string
+	EntityType  string
+	EntityID    string
+	Metadata    map[string]string
+}
+
+type commentReactionTargetState struct {
+	Post      visiblePost
+	CommentID string
+	AuthorID  string
+}
+
+type groupCommentReactionTargetState struct {
+	Post      groupPostState
+	CommentID string
+	AuthorID  string
+}
+
 func (s Service) SetPostReaction(ctx context.Context, userID, postID, reactionType string) (ReactionResult, error) {
 	normalizedReaction, err := normalizeReactionType(reactionType)
 	if err != nil {
@@ -73,10 +95,27 @@ func (s Service) SetPostReaction(ctx context.Context, userID, postID, reactionTy
 		return ReactionResult{}, err
 	}
 
-	if err := s.upsertReaction(ctx, postReactionTarget, post.ID, userID, normalizedReaction); err != nil {
+	createdNotification, err := s.createReactionWithNotification(
+		ctx,
+		postReactionTarget,
+		post.ID,
+		userID,
+		normalizedReaction,
+		reactionNotification{
+			RecipientID: post.AuthorID,
+			Type:        "post_reaction",
+			Title:       "New reaction on your post",
+			Body:        reactionPostBody(ctx, s, userID, post.Title),
+			EntityType:  "post",
+			EntityID:    post.ID,
+			Metadata:    map[string]string{"postId": post.ID},
+		},
+	)
+	if err != nil {
 		return ReactionResult{}, err
 	}
 
+	s.publishReactionNotification(createdNotification)
 	return s.loadReactionResult(ctx, postReactionTarget, userID, post.ID)
 }
 
@@ -99,16 +138,33 @@ func (s Service) SetCommentReaction(ctx context.Context, userID, postID, comment
 		return ReactionResult{}, err
 	}
 
-	normalizedCommentID, err := s.requireCommentAccess(ctx, userID, postID, commentID)
+	target, err := s.loadCommentReactionTarget(ctx, userID, postID, commentID)
 	if err != nil {
 		return ReactionResult{}, err
 	}
 
-	if err := s.upsertReaction(ctx, commentReactionTarget, normalizedCommentID, userID, normalizedReaction); err != nil {
+	createdNotification, err := s.createReactionWithNotification(
+		ctx,
+		commentReactionTarget,
+		target.CommentID,
+		userID,
+		normalizedReaction,
+		reactionNotification{
+			RecipientID: target.AuthorID,
+			Type:        "comment_reaction",
+			Title:       "New reaction on your comment",
+			Body:        reactionCommentBody(ctx, s, userID, target.Post.Title),
+			EntityType:  "comment",
+			EntityID:    target.CommentID,
+			Metadata:    map[string]string{"postId": target.Post.ID, "commentId": target.CommentID},
+		},
+	)
+	if err != nil {
 		return ReactionResult{}, err
 	}
 
-	return s.loadReactionResult(ctx, commentReactionTarget, userID, normalizedCommentID)
+	s.publishReactionNotification(createdNotification)
+	return s.loadReactionResult(ctx, commentReactionTarget, userID, target.CommentID)
 }
 
 func (s Service) ClearCommentReaction(ctx context.Context, userID, postID, commentID string) (ReactionResult, error) {
@@ -135,10 +191,27 @@ func (s Service) SetGroupPostReaction(ctx context.Context, userID, groupID, grou
 		return ReactionResult{}, err
 	}
 
-	if err := s.upsertReaction(ctx, groupPostReactionTarget, post.ID, userID, normalizedReaction); err != nil {
+	createdNotification, err := s.createReactionWithNotification(
+		ctx,
+		groupPostReactionTarget,
+		post.ID,
+		userID,
+		normalizedReaction,
+		reactionNotification{
+			RecipientID: post.AuthorID,
+			Type:        "group_post_reaction",
+			Title:       "New reaction on your group post",
+			Body:        reactionGroupPostBody(ctx, s, userID),
+			EntityType:  "group_post",
+			EntityID:    post.ID,
+			Metadata:    map[string]string{"groupId": post.GroupID, "groupPostId": post.ID},
+		},
+	)
+	if err != nil {
 		return ReactionResult{}, err
 	}
 
+	s.publishReactionNotification(createdNotification)
 	return s.loadReactionResult(ctx, groupPostReactionTarget, userID, post.ID)
 }
 
@@ -161,16 +234,33 @@ func (s Service) SetGroupCommentReaction(ctx context.Context, userID, groupID, g
 		return ReactionResult{}, err
 	}
 
-	normalizedCommentID, err := s.requireGroupCommentAccess(ctx, userID, groupID, groupPostID, commentID)
+	target, err := s.loadGroupCommentReactionTarget(ctx, userID, groupID, groupPostID, commentID)
 	if err != nil {
 		return ReactionResult{}, err
 	}
 
-	if err := s.upsertReaction(ctx, groupCommentReactionTarget, normalizedCommentID, userID, normalizedReaction); err != nil {
+	createdNotification, err := s.createReactionWithNotification(
+		ctx,
+		groupCommentReactionTarget,
+		target.CommentID,
+		userID,
+		normalizedReaction,
+		reactionNotification{
+			RecipientID: target.AuthorID,
+			Type:        "group_comment_reaction",
+			Title:       "New reaction on your group comment",
+			Body:        reactionGroupCommentBody(ctx, s, userID),
+			EntityType:  "group_comment",
+			EntityID:    target.CommentID,
+			Metadata:    map[string]string{"groupId": target.Post.GroupID, "groupPostId": target.Post.ID, "commentId": target.CommentID},
+		},
+	)
+	if err != nil {
 		return ReactionResult{}, err
 	}
 
-	return s.loadReactionResult(ctx, groupCommentReactionTarget, userID, normalizedCommentID)
+	s.publishReactionNotification(createdNotification)
+	return s.loadReactionResult(ctx, groupCommentReactionTarget, userID, target.CommentID)
 }
 
 func (s Service) ClearGroupCommentReaction(ctx context.Context, userID, groupID, groupPostID, commentID string) (ReactionResult, error) {
@@ -187,14 +277,23 @@ func (s Service) ClearGroupCommentReaction(ctx context.Context, userID, groupID,
 }
 
 func (s Service) requireCommentAccess(ctx context.Context, userID, postID, commentID string) (string, error) {
-	post, err := s.loadVisiblePost(ctx, s.db, userID, strings.TrimSpace(postID))
+	target, err := s.loadCommentReactionTarget(ctx, userID, postID, commentID)
 	if err != nil {
 		return "", err
 	}
 
+	return target.CommentID, nil
+}
+
+func (s Service) loadCommentReactionTarget(ctx context.Context, userID, postID, commentID string) (commentReactionTargetState, error) {
+	post, err := s.loadVisiblePost(ctx, s.db, userID, strings.TrimSpace(postID))
+	if err != nil {
+		return commentReactionTargetState{}, err
+	}
+
 	normalizedCommentID := strings.TrimSpace(commentID)
 	if normalizedCommentID == "" {
-		return "", &ValidationError{
+		return commentReactionTargetState{}, &ValidationError{
 			Message: "Choose a comment first.",
 			Fields: map[string]string{
 				"commentId": "Choose a comment first.",
@@ -202,32 +301,44 @@ func (s Service) requireCommentAccess(ctx context.Context, userID, postID, comme
 		}
 	}
 
-	var exists bool
+	target := commentReactionTargetState{
+		Post:      post,
+		CommentID: normalizedCommentID,
+	}
 	if err := s.db.QueryRowContext(
 		ctx,
-		`SELECT EXISTS (SELECT 1 FROM comments WHERE id = $1 AND post_id = $2)`,
+		`SELECT author_id FROM comments WHERE id = $1 AND post_id = $2`,
 		normalizedCommentID,
 		post.ID,
-	).Scan(&exists); err != nil {
-		return "", fmt.Errorf("check comment access: %w", err)
+	).Scan(&target.AuthorID); err != nil {
+		if err == sql.ErrNoRows {
+			return commentReactionTargetState{}, ErrNotFound
+		}
+
+		return commentReactionTargetState{}, fmt.Errorf("load comment reaction target: %w", err)
 	}
 
-	if !exists {
-		return "", ErrNotFound
-	}
-
-	return normalizedCommentID, nil
+	return target, nil
 }
 
 func (s Service) requireGroupCommentAccess(ctx context.Context, userID, groupID, groupPostID, commentID string) (string, error) {
-	post, err := s.loadGroupPostState(ctx, s.db, userID, groupID, groupPostID)
+	target, err := s.loadGroupCommentReactionTarget(ctx, userID, groupID, groupPostID, commentID)
 	if err != nil {
 		return "", err
 	}
 
+	return target.CommentID, nil
+}
+
+func (s Service) loadGroupCommentReactionTarget(ctx context.Context, userID, groupID, groupPostID, commentID string) (groupCommentReactionTargetState, error) {
+	post, err := s.loadGroupPostState(ctx, s.db, userID, groupID, groupPostID)
+	if err != nil {
+		return groupCommentReactionTargetState{}, err
+	}
+
 	normalizedCommentID := strings.TrimSpace(commentID)
 	if normalizedCommentID == "" {
-		return "", &ValidationError{
+		return groupCommentReactionTargetState{}, &ValidationError{
 			Message: "Choose a group comment first.",
 			Fields: map[string]string{
 				"commentId": "Choose a group comment first.",
@@ -235,41 +346,104 @@ func (s Service) requireGroupCommentAccess(ctx context.Context, userID, groupID,
 		}
 	}
 
-	var exists bool
+	target := groupCommentReactionTargetState{
+		Post:      post,
+		CommentID: normalizedCommentID,
+	}
 	if err := s.db.QueryRowContext(
 		ctx,
-		`SELECT EXISTS (SELECT 1 FROM group_comments WHERE id = $1 AND group_post_id = $2)`,
+		`SELECT author_id FROM group_comments WHERE id = $1 AND group_post_id = $2`,
 		normalizedCommentID,
 		post.ID,
-	).Scan(&exists); err != nil {
-		return "", fmt.Errorf("check group comment access: %w", err)
+	).Scan(&target.AuthorID); err != nil {
+		if err == sql.ErrNoRows {
+			return groupCommentReactionTargetState{}, ErrNotFound
+		}
+
+		return groupCommentReactionTargetState{}, fmt.Errorf("load group comment reaction target: %w", err)
 	}
 
-	if !exists {
-		return "", ErrNotFound
-	}
-
-	return normalizedCommentID, nil
+	return target, nil
 }
 
-func (s Service) upsertReaction(ctx context.Context, target reactionTargetConfig, targetID, userID, reactionType string) error {
+func (s Service) createReactionWithNotification(ctx context.Context, target reactionTargetConfig, targetID, userID, reactionType string, notification reactionNotification) (notificationDelivery, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return notificationDelivery{}, fmt.Errorf("begin %s reaction transaction: %w", target.TargetType, err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	inserted, err := s.upsertReaction(ctx, tx, target, targetID, userID, reactionType)
+	if err != nil {
+		return notificationDelivery{}, err
+	}
+
+	var createdNotification Notification
+	if inserted && strings.TrimSpace(notification.RecipientID) != "" && notification.RecipientID != userID {
+		createdNotification, err = s.insertNotification(
+			ctx,
+			tx,
+			notification.RecipientID,
+			notification.Type,
+			notification.Title,
+			notification.Body,
+			notification.EntityType,
+			notification.EntityID,
+			notification.Metadata,
+		)
+		if err != nil {
+			return notificationDelivery{}, err
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return notificationDelivery{}, fmt.Errorf("commit %s reaction transaction: %w", target.TargetType, err)
+	}
+
+	return notificationDelivery{
+		UserID:       notification.RecipientID,
+		Notification: createdNotification,
+	}, nil
+}
+
+func (s Service) publishReactionNotification(delivery notificationDelivery) {
+	if delivery.Notification.ID == "" {
+		return
+	}
+
+	s.publisher.PublishToUser(delivery.UserID, "notification.created", NotificationEvent{
+		Notification: delivery.Notification,
+	})
+}
+
+func (s Service) upsertReaction(ctx context.Context, executor sqlExecutor, target reactionTargetConfig, targetID, userID, reactionType string) (bool, error) {
 	query := fmt.Sprintf(
 		`
 			INSERT INTO %s (%s, user_id, reaction_type, created_at, updated_at)
 			VALUES ($1, $2, $3, NOW(), NOW())
 			ON CONFLICT (%s, user_id)
-			DO UPDATE SET reaction_type = EXCLUDED.reaction_type, updated_at = NOW()
+			DO NOTHING
 		`,
 		target.Table,
 		target.TargetColumn,
 		target.TargetColumn,
 	)
 
-	if _, err := s.db.ExecContext(ctx, query, targetID, userID, reactionType); err != nil {
-		return fmt.Errorf("upsert %s reaction: %w", target.TargetType, err)
+	result, err := executor.ExecContext(ctx, query, targetID, userID, reactionType)
+	if err != nil {
+		return false, fmt.Errorf("upsert %s reaction: %w", target.TargetType, err)
 	}
 
-	return nil
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("count %s reaction rows: %w", target.TargetType, err)
+	}
+
+	return rowsAffected > 0, nil
 }
 
 func (s Service) deleteReaction(ctx context.Context, target reactionTargetConfig, targetID, userID string) error {
@@ -300,6 +474,41 @@ func (s Service) loadReactionResult(ctx context.Context, target reactionTargetCo
 		ViewerReaction: summary.ViewerReaction,
 		ReactionUsers:  ensureReactionUsers(summary.Users),
 	}, nil
+}
+
+func reactionPostBody(ctx context.Context, s Service, actorID, postTitle string) string {
+	actorName := reactionActorName(ctx, s, actorID)
+	if strings.TrimSpace(postTitle) == "" {
+		return fmt.Sprintf("%s reacted to your post.", actorName)
+	}
+
+	return fmt.Sprintf("%s reacted to \"%s\".", actorName, postTitle)
+}
+
+func reactionCommentBody(ctx context.Context, s Service, actorID, postTitle string) string {
+	actorName := reactionActorName(ctx, s, actorID)
+	if strings.TrimSpace(postTitle) == "" {
+		return fmt.Sprintf("%s reacted to your comment.", actorName)
+	}
+
+	return fmt.Sprintf("%s reacted to your comment on \"%s\".", actorName, postTitle)
+}
+
+func reactionGroupPostBody(ctx context.Context, s Service, actorID string) string {
+	return fmt.Sprintf("%s reacted to your group post.", reactionActorName(ctx, s, actorID))
+}
+
+func reactionGroupCommentBody(ctx context.Context, s Service, actorID string) string {
+	return fmt.Sprintf("%s reacted to your group comment.", reactionActorName(ctx, s, actorID))
+}
+
+func reactionActorName(ctx context.Context, s Service, actorID string) string {
+	actor, err := s.loadUserIdentity(ctx, s.db, actorID)
+	if err != nil {
+		return "Someone"
+	}
+
+	return actor.DisplayName()
 }
 
 func (s Service) loadReactionSummaries(ctx context.Context, target reactionTargetConfig, viewerID string, targetIDs []string) (map[string]reactionSummary, error) {

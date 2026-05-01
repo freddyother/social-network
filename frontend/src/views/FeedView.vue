@@ -161,6 +161,19 @@ function shouldOpenCommentsFromRoute() {
   return String(rawValue || "").trim() === "1"
 }
 
+function routeCommentId() {
+  const rawValue = route.query.comment
+  if (Array.isArray(rawValue)) {
+    return String(rawValue[0] || "").trim()
+  }
+
+  return typeof rawValue === "string" ? rawValue.trim() : ""
+}
+
+function isRouteComment(comment) {
+  return Boolean(comment?.id && routeCommentId() === comment.id)
+}
+
 function canEditAuthor(author) {
   return Boolean(author?.id && author.id === currentUserId.value)
 }
@@ -899,7 +912,8 @@ async function focusPostFromRoute() {
     return
   }
 
-  if (shouldOpenCommentsFromRoute()) {
+  const targetCommentId = routeCommentId()
+  if (shouldOpenCommentsFromRoute() || targetCommentId) {
     ensureCommentState(targetPost.id)
 
     if (!expandedComments[targetPost.id]) {
@@ -910,9 +924,13 @@ async function focusPostFromRoute() {
   }
 
   await nextTick()
-  document.getElementById(`post-${targetPost.id}`)?.scrollIntoView({
+  const targetElement = targetCommentId
+    ? document.getElementById(`comment-${targetCommentId}`)
+    : document.getElementById(`post-${targetPost.id}`)
+
+  targetElement?.scrollIntoView({
     behavior: "smooth",
-    block: "start"
+    block: targetCommentId ? "center" : "start"
   })
 }
 
@@ -1127,7 +1145,7 @@ watch(
 )
 
 watch(
-  () => [route.query.post, route.query.comments],
+  () => [route.query.post, route.query.comments, route.query.comment],
   () => {
     void focusPostFromRoute()
   }
@@ -1390,7 +1408,13 @@ watch(
                   <p v-if="commentsLoading[post.id]" class="feed-note">Loading comments...</p>
 
                   <div v-else-if="commentsByPost[post.id]?.length" class="comment-stack">
-                    <article v-for="comment in commentsByPost[post.id]" :key="comment.id" class="comment-card">
+                    <article
+                      v-for="comment in commentsByPost[post.id]"
+                      :id="`comment-${comment.id}`"
+                      :key="comment.id"
+                      class="comment-card"
+                      :class="{ 'comment-card--target': isRouteComment(comment) }"
+                    >
                       <header class="comment-card__header">
                         <div class="comment-card__header-main">
                           <strong>{{ displayName(comment.author) }}</strong>
@@ -1512,8 +1536,10 @@ watch(
                       <div v-if="comment.replies?.length" class="reply-stack">
                         <article
                           v-for="reply in comment.replies"
+                          :id="`comment-${reply.id}`"
                           :key="reply.id"
                           class="comment-card comment-card--reply"
+                          :class="{ 'comment-card--target': isRouteComment(reply) }"
                         >
                           <header class="comment-card__header">
                             <div class="comment-card__header-main">
@@ -1840,7 +1866,12 @@ watch(
               <p v-else-if="isLoadingSelectedPostComments" class="feed-note">Loading comments...</p>
 
               <div v-else-if="selectedPostComments.length" class="comment-stack post-modal__comment-stack">
-                <article v-for="comment in selectedPostComments" :key="comment.id" class="comment-card">
+                <article
+                  v-for="comment in selectedPostComments"
+                  :key="comment.id"
+                  class="comment-card"
+                  :class="{ 'comment-card--target': isRouteComment(comment) }"
+                >
                   <header class="comment-card__header">
                     <div class="comment-card__header-main">
                       <strong>{{ displayName(comment.author) }}</strong>
@@ -1878,6 +1909,7 @@ watch(
                       v-for="reply in comment.replies"
                       :key="reply.id"
                       class="comment-card comment-card--reply"
+                      :class="{ 'comment-card--target': isRouteComment(reply) }"
                     >
                       <header class="comment-card__header">
                         <div class="comment-card__header-main">
