@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, reactive, ref } from "vue"
 import { useRouter } from "vue-router"
 
+import EmojiPicker from "../components/ui/EmojiPicker.vue"
 import { createPost, isApiError } from "../services/api"
 import { useAppStore } from "../stores/app"
 
@@ -48,6 +49,14 @@ function handleImageSelection(event) {
   const files = Array.from(event.target.files || [])
   composer.images = files
   syncSelectedImages(files)
+}
+
+function appendEmojiToCaption(emoji) {
+  if (!emoji) {
+    return
+  }
+
+  composer.body = `${composer.body || ""}${emoji}`
 }
 
 async function submitPost() {
@@ -123,8 +132,11 @@ onBeforeUnmount(() => {
             :aria-invalid="Boolean(composerErrors.body)"
             required
           ></textarea>
-          <p v-if="composerErrors.body" class="form-error">{{ composerErrors.body }}</p>
         </label>
+        <div class="composer-toolbar">
+          <EmojiPicker label="Add emoji to caption" @select="appendEmojiToCaption" />
+        </div>
+        <p v-if="composerErrors.body" class="form-error">{{ composerErrors.body }}</p>
 
         <div class="feed-composer__row">
           <label>

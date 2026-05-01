@@ -3,6 +3,7 @@ import { Heart } from "lucide-vue-next"
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 
+import EmojiPicker from "../components/ui/EmojiPicker.vue"
 import {
   acceptGroupJoinRequest,
   clearGroupCommentReaction,
@@ -397,6 +398,14 @@ function resetGroupPostComposer() {
   groupPostForm.images = []
   revokeGroupPostPreviewURLs()
   groupPostPreviews.value = []
+}
+
+function appendEmojiToTextForm(form, emoji) {
+  if (!form || !emoji) {
+    return
+  }
+
+  form.body = `${form.body || ""}${emoji}`
 }
 
 function handleGroupPostImageSelection(event) {
@@ -1671,6 +1680,10 @@ watch(
                     ></textarea>
                   </label>
 
+                  <div class="composer-toolbar">
+                    <EmojiPicker label="Add emoji to group comment" @select="appendEmojiToTextForm(groupCommentForms[post.id], $event)" />
+                  </div>
+
                   <div class="comment-composer__actions">
                     <p class="feed-note">Comments stay flat in this MVP so the feed remains lightweight.</p>
                     <button type="submit" class="button button--small" :disabled="groupCommentSubmitting[post.id]">
@@ -1846,6 +1859,10 @@ watch(
                     placeholder="Share an update, ask for feedback, or post images from inside this group."
                   ></textarea>
                 </label>
+
+                <div class="composer-toolbar">
+                  <EmojiPicker label="Add emoji to group post" @select="appendEmojiToTextForm(groupPostForm, $event)" />
+                </div>
 
                 <label>
                   <span>Images</span>

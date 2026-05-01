@@ -16,6 +16,7 @@ import {
   sendGroupMessage,
   sendPrivateMessage
 } from "../services/api"
+import EmojiPicker from "../components/ui/EmojiPicker.vue"
 import { realtimeClient } from "../services/realtime"
 import { useAppStore } from "../stores/app"
 import { formatDate as formatAppDate, formatTime } from "../utils/date"
@@ -897,6 +898,14 @@ function handleMessageListScroll() {
   }
 }
 
+function appendEmojiToMessage(emoji) {
+  if (!emoji) {
+    return
+  }
+
+  composer.body = `${composer.body || ""}${emoji}`
+}
+
 async function submitMessage() {
   if (!activeConversationUserId.value && !activeGroupId.value) {
     return
@@ -1354,6 +1363,10 @@ onBeforeUnmount(() => {
                   :placeholder="isGroupThread ? 'Write to everyone in this group...' : 'Write a private message...'"
                 ></textarea>
               </label>
+
+              <div class="composer-toolbar">
+                <EmojiPicker label="Add emoji to message" @select="appendEmojiToMessage" />
+              </div>
 
               <div class="chat-composer__actions">
                 <p class="feed-note">

@@ -3,6 +3,7 @@ import { Heart } from "lucide-vue-next"
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { RouterLink, useRoute } from "vue-router"
 
+import EmojiPicker from "../components/ui/EmojiPicker.vue"
 import {
   clearCommentReaction,
   clearPostReaction,
@@ -135,6 +136,14 @@ function reactionUsers(target) {
 
 function reactionOverflowCount(target) {
   return Math.max(0, Number(target?.reactionsCount || 0) - reactionUsers(target).length)
+}
+
+function appendEmojiToTextForm(form, emoji) {
+  if (!form || !emoji) {
+    return
+  }
+
+  form.body = `${form.body || ""}${emoji}`
 }
 
 function clearObject(object) {
@@ -1297,6 +1306,9 @@ watch(
                   maxlength="3000"
                   placeholder="Post caption"
                 ></textarea>
+                <div class="composer-toolbar">
+                  <EmojiPicker label="Add emoji to post caption" @select="appendEmojiToTextForm(postEditForms[post.id], $event)" />
+                </div>
                 <div class="post-editor__row">
                   <label class="post-editor__field">
                     <span>Visibility</span>
@@ -1391,6 +1403,9 @@ watch(
                       rows="2"
                       placeholder="Add a comment to this post"
                     ></textarea>
+                    <div class="composer-toolbar">
+                      <EmojiPicker label="Add emoji to comment" @select="appendEmojiToTextForm(commentForms[post.id], $event)" />
+                    </div>
                     <div class="comment-composer__actions">
                       <p class="feed-note">Replies are limited to two levels for now.</p>
                       <button
@@ -1440,6 +1455,9 @@ watch(
                           maxlength="1000"
                           placeholder="Update your comment"
                         ></textarea>
+                        <div class="composer-toolbar">
+                          <EmojiPicker label="Add emoji to comment" @select="appendEmojiToTextForm(commentEditForms[comment.id], $event)" />
+                        </div>
                         <div class="comment-composer__actions">
                           <p class="feed-note">Your place in the thread stays the same after editing.</p>
                           <div class="editor-actions">
@@ -1516,6 +1534,9 @@ watch(
                           rows="2"
                           placeholder="Reply to this comment"
                         ></textarea>
+                        <div class="composer-toolbar">
+                          <EmojiPicker label="Add emoji to reply" @select="appendEmojiToTextForm(replyForms[replyKey(post.id, comment.id)], $event)" />
+                        </div>
                         <div class="comment-composer__actions">
                           <p class="feed-note">Second level only in the current UI.</p>
                           <button
@@ -1566,6 +1587,9 @@ watch(
                               maxlength="1000"
                               placeholder="Update your reply"
                             ></textarea>
+                            <div class="composer-toolbar">
+                              <EmojiPicker label="Add emoji to reply" @select="appendEmojiToTextForm(commentEditForms[reply.id], $event)" />
+                            </div>
                             <div class="comment-composer__actions">
                               <p class="feed-note">Reply editing is only available to its author.</p>
                               <div class="editor-actions">
@@ -1810,6 +1834,9 @@ watch(
                   maxlength="3000"
                   placeholder="Post caption"
                 ></textarea>
+                <div class="composer-toolbar">
+                  <EmojiPicker label="Add emoji to post caption" @select="appendEmojiToTextForm(postEditForms[selectedPost.id], $event)" />
+                </div>
                 <div class="post-editor__row">
                   <label class="post-editor__field">
                     <span>Visibility</span>
