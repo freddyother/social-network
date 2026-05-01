@@ -77,15 +77,17 @@ type PostMedia struct {
 }
 
 type Post struct {
-	ID            string      `json:"id"`
-	Title         string      `json:"title"`
-	Body          string      `json:"body"`
-	Privacy       string      `json:"privacy"`
-	CreatedAt     time.Time   `json:"createdAt"`
-	UpdatedAt     time.Time   `json:"updatedAt"`
-	CommentsCount int         `json:"commentsCount"`
-	Author        PostAuthor  `json:"author"`
-	Media         []PostMedia `json:"media"`
+	ID             string      `json:"id"`
+	Title          string      `json:"title"`
+	Body           string      `json:"body"`
+	Privacy        string      `json:"privacy"`
+	CreatedAt      time.Time   `json:"createdAt"`
+	UpdatedAt      time.Time   `json:"updatedAt"`
+	CommentsCount  int         `json:"commentsCount"`
+	ReactionsCount int         `json:"reactionsCount"`
+	ViewerReaction string      `json:"viewerReaction,omitempty"`
+	Author         PostAuthor  `json:"author"`
+	Media          []PostMedia `json:"media"`
 }
 
 type SuggestedUser struct {
@@ -297,6 +299,12 @@ func (s Service) UpdatePost(ctx context.Context, author auth.User, postID string
 		return Post{}, err
 	}
 
+	reactionsByPostID, err := s.loadReactionSummaries(ctx, postReactionTarget, author.ID, []string{postID})
+	if err != nil {
+		return Post{}, err
+	}
+
+	reactionSummary := reactionsByPostID[postID]
 	post := Post{
 		ID:        postID,
 		Title:     normalizedInput.Title,
@@ -311,8 +319,10 @@ func (s Service) UpdatePost(ctx context.Context, author auth.User, postID string
 			Nickname:          author.Nickname,
 			ProfileVisibility: author.ProfileVisibility,
 		},
-		Media:         mediaByPostID[postID],
-		CommentsCount: commentCountsByPostID[postID],
+		Media:          mediaByPostID[postID],
+		CommentsCount:  commentCountsByPostID[postID],
+		ReactionsCount: reactionSummary.Count,
+		ViewerReaction: reactionSummary.ViewerReaction,
 	}
 
 	s.publisher.PublishToPost(postID, "post.updated", PostEvent{
@@ -435,7 +445,7 @@ func (s Service) Feed(ctx context.Context, viewerID string) ([]Post, error) {
 	}
 	defer rows.Close()
 
-	return s.loadPostsFromRows(ctx, rows, "feed")
+	return s.loadPostsFromRows(ctx, rows, "feed", viewerID)
 }
 
 func (s Service) MyPosts(ctx context.Context, userID string) ([]Post, error) {
@@ -467,7 +477,7 @@ func (s Service) MyPosts(ctx context.Context, userID string) ([]Post, error) {
 	}
 	defer rows.Close()
 
-	return s.loadPostsFromRows(ctx, rows, "my posts")
+	return s.loadPostsFromRows(ctx, rows, "my posts", userID)
 }
 
 func (s Service) CanViewPost(ctx context.Context, viewerID, postID string) bool {
@@ -1197,7 +1207,7 @@ func (s Service) buildPostMedia(saved []savedMedia) []PostMedia {
 	return media
 }
 
-func (s Service) loadPostsFromRows(ctx context.Context, rows *sql.Rows, operation string) ([]Post, error) {
+func (s Service) loadPostsFromRows(ctx context.Context, rows *sql.Rows, operation, viewerID string) ([]Post, error) {
 	posts := make([]Post, 0)
 	postIDs := make([]string, 0)
 
@@ -1239,9 +1249,17 @@ func (s Service) loadPostsFromRows(ctx context.Context, rows *sql.Rows, operatio
 		return nil, err
 	}
 
+	reactionsByPostID, err := s.loadReactionSummaries(ctx, postReactionTarget, viewerID, postIDs)
+	if err != nil {
+		return nil, err
+	}
+
 	for index := range posts {
+		reactionSummary := reactionsByPostID[posts[index].ID]
 		posts[index].Media = mediaByPostID[posts[index].ID]
 		posts[index].CommentsCount = commentCountsByPostID[posts[index].ID]
+		posts[index].ReactionsCount = reactionSummary.Count
+		posts[index].ViewerReaction = reactionSummary.ViewerReaction
 	}
 
 	return posts, nil

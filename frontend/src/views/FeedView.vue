@@ -1,8 +1,11 @@
 <script setup>
+import { Heart } from "lucide-vue-next"
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { RouterLink, useRoute } from "vue-router"
 
 import {
+  clearCommentReaction,
+  clearPostReaction,
   createComment,
   deletePost as deletePostRequest,
   fetchComments,
@@ -12,6 +15,8 @@ import {
   fetchPost,
   followUser,
   isApiError,
+  setCommentReaction,
+  setPostReaction,
   updateComment,
   updatePost
 } from "../services/api"
@@ -60,6 +65,7 @@ const postDeleteLoading = reactive({})
 const commentEditForms = reactive({})
 const commentEditSaving = reactive({})
 const commentEditErrors = reactive({})
+const reactionLoading = reactive({})
 const selectedPostId = ref("")
 const previousBodyOverflow = ref("")
 const removeRealtimeListeners = []
@@ -109,6 +115,18 @@ function displayName(user) {
 
 function commentCountLabel(count) {
   return Number(count || 0) === 1 ? "1 comment" : `${Number(count || 0)} comments`
+}
+
+function reactionCountLabel(count) {
+  return Number(count || 0) === 1 ? "1 like" : `${Number(count || 0)} likes`
+}
+
+function reactionKey(type, id) {
+  return `${type}:${id}`
+}
+
+function hasViewerReaction(target) {
+  return Boolean(target?.viewerReaction)
 }
 
 function clearObject(object) {
@@ -348,7 +366,9 @@ function applyUpdatedPost(updatedPost) {
       ? {
           ...item,
           ...updatedPost,
-          commentsCount: updatedPost.commentsCount ?? item.commentsCount ?? 0
+          commentsCount: updatedPost.commentsCount ?? item.commentsCount ?? 0,
+          reactionsCount: updatedPost.reactionsCount ?? item.reactionsCount ?? 0,
+          viewerReaction: item.viewerReaction || ""
         }
       : item
   )
@@ -357,6 +377,54 @@ function applyUpdatedPost(updatedPost) {
   if (latestPost) {
     syncPostEditForm(latestPost, { preserveDraft: true })
   }
+}
+
+function applyPostReaction(postId, reaction) {
+  if (!postId || !reaction) {
+    return
+  }
+
+  posts.value = posts.value.map((item) =>
+    item.id === postId
+      ? {
+          ...item,
+          reactionsCount: reaction.reactionsCount ?? item.reactionsCount ?? 0,
+          viewerReaction: reaction.viewerReaction || ""
+        }
+      : item
+  )
+}
+
+function updateCommentReactionInPost(postId, commentId, reaction) {
+  if (!postId || !commentId || !reaction) {
+    return
+  }
+
+  ensureCommentState(postId)
+  commentsByPost[postId] = commentsByPost[postId].map((item) => {
+    if (item.id === commentId) {
+      return {
+        ...item,
+        reactionsCount: reaction.reactionsCount ?? item.reactionsCount ?? 0,
+        viewerReaction: reaction.viewerReaction || ""
+      }
+    }
+
+    const replies = (item.replies || []).map((reply) =>
+      reply.id === commentId
+        ? {
+            ...reply,
+            reactionsCount: reaction.reactionsCount ?? reply.reactionsCount ?? 0,
+            viewerReaction: reaction.viewerReaction || ""
+          }
+        : reply
+    )
+
+    return {
+      ...item,
+      replies
+    }
+  })
 }
 
 function removePostFromState(postId) {
@@ -407,6 +475,7 @@ function removePostFromState(postId) {
   delete postEditSaving[postId]
   delete postEditErrorByPost[postId]
   delete postDeleteLoading[postId]
+  delete reactionLoading[reactionKey("post", postId)]
 
   for (const key of Object.keys(replyForms)) {
     if (key.startsWith(`${postId}:`)) {
@@ -417,6 +486,12 @@ function removePostFromState(postId) {
   for (const key of Object.keys(commentSubmitting)) {
     if (key === postId || key.startsWith(`${postId}:`)) {
       delete commentSubmitting[key]
+    }
+  }
+
+  for (const key of Object.keys(reactionLoading)) {
+    if (key.startsWith(`comment:${postId}:`)) {
+      delete reactionLoading[key]
     }
   }
 }
@@ -435,6 +510,8 @@ function applyUpdatedComment(postId, updatedComment) {
       return {
         ...item,
         ...updatedComment,
+        reactionsCount: updatedComment.reactionsCount ?? item.reactionsCount ?? 0,
+        viewerReaction: item.viewerReaction || "",
         replies: item.replies || []
       }
     }
@@ -449,7 +526,9 @@ function applyUpdatedComment(postId, updatedComment) {
       updated = true
       return {
         ...reply,
-        ...updatedComment
+        ...updatedComment,
+        reactionsCount: updatedComment.reactionsCount ?? reply.reactionsCount ?? 0,
+        viewerReaction: reply.viewerReaction || ""
       }
     })
 
@@ -492,6 +571,7 @@ async function loadFeedData() {
     clearObject(commentEditForms)
     clearObject(commentEditSaving)
     clearObject(commentEditErrors)
+    clearObject(reactionLoading)
     return
   }
 
@@ -524,6 +604,7 @@ async function loadFeedData() {
     clearObject(commentEditForms)
     clearObject(commentEditSaving)
     clearObject(commentEditErrors)
+    clearObject(reactionLoading)
 
     for (const post of feedPosts) {
       activeSlides[post.id] = 0
@@ -540,6 +621,58 @@ async function loadFeedData() {
         : "Could not load the feed."
   } finally {
     isLoading.value = false
+  }
+}
+
+async function togglePostReaction(post) {
+  if (!post?.id) {
+    return
+  }
+
+  const key = reactionKey("post", post.id)
+  if (reactionLoading[key]) {
+    return
+  }
+
+  reactionLoading[key] = true
+  requestError.value = ""
+
+  try {
+    const reaction = hasViewerReaction(post)
+      ? await clearPostReaction(post.id)
+      : await setPostReaction(post.id)
+
+    applyPostReaction(post.id, reaction)
+  } catch (error) {
+    requestError.value = error instanceof Error ? error.message : "Could not update the reaction."
+  } finally {
+    reactionLoading[key] = false
+  }
+}
+
+async function toggleCommentReaction(postId, comment) {
+  if (!postId || !comment?.id) {
+    return
+  }
+
+  const key = reactionKey("comment", `${postId}:${comment.id}`)
+  if (reactionLoading[key]) {
+    return
+  }
+
+  reactionLoading[key] = true
+  commentErrorByPost[postId] = ""
+
+  try {
+    const reaction = hasViewerReaction(comment)
+      ? await clearCommentReaction(postId, comment.id)
+      : await setCommentReaction(postId, comment.id)
+
+    updateCommentReactionInPost(postId, comment.id, reaction)
+  } catch (error) {
+    commentErrorByPost[postId] = error instanceof Error ? error.message : "Could not update the reaction."
+  } finally {
+    reactionLoading[key] = false
   }
 }
 
@@ -1046,6 +1179,7 @@ watch(
                   <div class="profile-gallery__badges">
                     <span v-if="post.media?.length > 1" class="badge badge--neutral">{{ post.media.length }} photos</span>
                     <span class="badge">{{ post.privacy }}</span>
+                    <span class="badge badge--neutral">{{ reactionCountLabel(post.reactionsCount || 0) }}</span>
                     <span class="badge badge--soft">{{ commentCountLabel(post.commentsCount || 0) }}</span>
                   </div>
 
@@ -1087,6 +1221,7 @@ watch(
                       <span class="badge">{{ post.privacy }}</span>
                       <span class="badge badge--soft">{{ post.author.profileVisibility }}</span>
                       <span class="badge badge--neutral">{{ commentCountLabel(post.commentsCount || 0) }}</span>
+                      <span class="badge badge--neutral">{{ reactionCountLabel(post.reactionsCount || 0) }}</span>
                     </p>
                   </template>
                 </div>
@@ -1185,6 +1320,21 @@ watch(
                 </div>
               </div>
 
+              <div class="reaction-bar">
+                <button
+                  type="button"
+                  class="reaction-button"
+                  :class="{ 'reaction-button--active': hasViewerReaction(post) }"
+                  :aria-pressed="hasViewerReaction(post)"
+                  :disabled="reactionLoading[reactionKey('post', post.id)]"
+                  @click="togglePostReaction(post)"
+                >
+                  <Heart :size="16" :fill="hasViewerReaction(post) ? 'currentColor' : 'none'" aria-hidden="true" />
+                  <span>{{ hasViewerReaction(post) ? "Liked" : "Like" }}</span>
+                </button>
+                <span class="feed-note">{{ reactionCountLabel(post.reactionsCount || 0) }}</span>
+              </div>
+
               <section class="post-comments">
                 <div class="post-comments__header">
                   <div>
@@ -1274,6 +1424,17 @@ watch(
                         <div class="editor-actions">
                           <button
                             type="button"
+                            class="reaction-button reaction-button--compact"
+                            :class="{ 'reaction-button--active': hasViewerReaction(comment) }"
+                            :aria-pressed="hasViewerReaction(comment)"
+                            :disabled="reactionLoading[reactionKey('comment', `${post.id}:${comment.id}`)]"
+                            @click="toggleCommentReaction(post.id, comment)"
+                          >
+                            <Heart :size="15" :fill="hasViewerReaction(comment) ? 'currentColor' : 'none'" aria-hidden="true" />
+                            <span>{{ hasViewerReaction(comment) ? "Liked" : "Like" }}</span>
+                          </button>
+                          <button
+                            type="button"
                             class="button button--ghost button--small"
                             @click="toggleReplyForm(post.id, comment.id)"
                           >
@@ -1285,6 +1446,7 @@ watch(
                           </button>
                         </div>
                         <span class="feed-note">
+                          {{ reactionCountLabel(comment.reactionsCount || 0) }} ·
                           {{ comment.replies?.length ? `${comment.replies.length} replies` : "No replies yet" }}
                         </span>
                       </div>
@@ -1370,6 +1532,21 @@ watch(
                           </form>
 
                           <p v-else class="comment-card__body">{{ reply.body }}</p>
+
+                          <div class="comment-card__actions">
+                            <button
+                              type="button"
+                              class="reaction-button reaction-button--compact"
+                              :class="{ 'reaction-button--active': hasViewerReaction(reply) }"
+                              :aria-pressed="hasViewerReaction(reply)"
+                              :disabled="reactionLoading[reactionKey('comment', `${post.id}:${reply.id}`)]"
+                              @click="toggleCommentReaction(post.id, reply)"
+                            >
+                              <Heart :size="15" :fill="hasViewerReaction(reply) ? 'currentColor' : 'none'" aria-hidden="true" />
+                              <span>{{ hasViewerReaction(reply) ? "Liked" : "Like" }}</span>
+                            </button>
+                            <span class="feed-note">{{ reactionCountLabel(reply.reactionsCount || 0) }}</span>
+                          </div>
                         </article>
                       </div>
                     </article>
@@ -1503,6 +1680,22 @@ watch(
               <div class="post-modal__meta">
                 <span class="badge">{{ selectedPost.privacy }}</span>
                 <span class="badge badge--neutral">{{ commentCountLabel(selectedPost.commentsCount || 0) }}</span>
+                <span class="badge badge--neutral">{{ reactionCountLabel(selectedPost.reactionsCount || 0) }}</span>
+              </div>
+
+              <div class="reaction-bar reaction-bar--modal">
+                <button
+                  type="button"
+                  class="reaction-button"
+                  :class="{ 'reaction-button--active': hasViewerReaction(selectedPost) }"
+                  :aria-pressed="hasViewerReaction(selectedPost)"
+                  :disabled="reactionLoading[reactionKey('post', selectedPost.id)]"
+                  @click="togglePostReaction(selectedPost)"
+                >
+                  <Heart :size="16" :fill="hasViewerReaction(selectedPost) ? 'currentColor' : 'none'" aria-hidden="true" />
+                  <span>{{ hasViewerReaction(selectedPost) ? "Liked" : "Like" }}</span>
+                </button>
+                <span class="feed-note">{{ reactionCountLabel(selectedPost.reactionsCount || 0) }}</span>
               </div>
 
               <button
@@ -1610,6 +1803,21 @@ watch(
 
                   <p class="comment-card__body">{{ comment.body }}</p>
 
+                  <div class="comment-card__actions">
+                    <button
+                      type="button"
+                      class="reaction-button reaction-button--compact"
+                      :class="{ 'reaction-button--active': hasViewerReaction(comment) }"
+                      :aria-pressed="hasViewerReaction(comment)"
+                      :disabled="reactionLoading[reactionKey('comment', `${selectedPost.id}:${comment.id}`)]"
+                      @click="toggleCommentReaction(selectedPost.id, comment)"
+                    >
+                      <Heart :size="15" :fill="hasViewerReaction(comment) ? 'currentColor' : 'none'" aria-hidden="true" />
+                      <span>{{ hasViewerReaction(comment) ? "Liked" : "Like" }}</span>
+                    </button>
+                    <span class="feed-note">{{ reactionCountLabel(comment.reactionsCount || 0) }}</span>
+                  </div>
+
                   <div v-if="comment.replies?.length" class="reply-stack">
                     <article
                       v-for="reply in comment.replies"
@@ -1624,6 +1832,21 @@ watch(
                       </header>
 
                       <p class="comment-card__body">{{ reply.body }}</p>
+
+                      <div class="comment-card__actions">
+                        <button
+                          type="button"
+                          class="reaction-button reaction-button--compact"
+                          :class="{ 'reaction-button--active': hasViewerReaction(reply) }"
+                          :aria-pressed="hasViewerReaction(reply)"
+                          :disabled="reactionLoading[reactionKey('comment', `${selectedPost.id}:${reply.id}`)]"
+                          @click="toggleCommentReaction(selectedPost.id, reply)"
+                        >
+                          <Heart :size="15" :fill="hasViewerReaction(reply) ? 'currentColor' : 'none'" aria-hidden="true" />
+                          <span>{{ hasViewerReaction(reply) ? "Liked" : "Like" }}</span>
+                        </button>
+                        <span class="feed-note">{{ reactionCountLabel(reply.reactionsCount || 0) }}</span>
+                      </div>
                     </article>
                   </div>
                 </article>

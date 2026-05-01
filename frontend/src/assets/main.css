@@ -588,6 +588,52 @@ select {
   border: 1px solid var(--line);
 }
 
+.reaction-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.reaction-bar--modal {
+  justify-content: flex-start;
+}
+
+.reaction-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.35rem;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--header-chip-bg);
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.reaction-button--compact {
+  min-height: 2rem;
+  padding: 0.38rem 0.68rem;
+  font-size: 0.9rem;
+}
+
+.reaction-button--active {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--line));
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.reaction-button:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.reaction-button svg {
+  flex: 0 0 auto;
+}
+
 .hero-panel,
 .panel,
 .feature-card {
@@ -1481,6 +1527,88 @@ label {
 
 .chat-panel__identity {
   justify-content: flex-start;
+}
+
+.chat-members {
+  position: relative;
+  display: inline-grid;
+  justify-items: start;
+}
+
+.chat-members:focus-visible {
+  border-radius: 10px;
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+.chat-members__trigger {
+  border-bottom: 1px dashed var(--line);
+  cursor: default;
+}
+
+.chat-members__popover {
+  position: absolute;
+  top: calc(100% + 0.55rem);
+  left: 0;
+  z-index: 30;
+  display: none;
+  width: min(330px, 78vw);
+  padding: 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--card-strong);
+  box-shadow: 0 20px 44px var(--panel-shadow);
+}
+
+.chat-members:hover .chat-members__popover,
+.chat-members:focus-within .chat-members__popover {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.chat-members__popover-head,
+.chat-members__item {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.chat-members__popover-head {
+  justify-content: space-between;
+}
+
+.chat-members__popover-head span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.chat-members__list {
+  display: grid;
+  gap: 0.65rem;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.chat-members__item {
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.chat-members__details {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.chat-members__details strong,
+.chat-members__details small {
+  overflow-wrap: anywhere;
+}
+
+.chat-members__details small {
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
 .chat-message-list {

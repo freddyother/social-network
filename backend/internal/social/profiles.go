@@ -42,7 +42,7 @@ func (s Service) ProfileByHandle(ctx context.Context, viewerID, handle string) (
 		return PublicProfilePage{}, err
 	}
 
-	posts, err := s.loadProfilePosts(ctx, profile)
+	posts, err := s.loadProfilePosts(ctx, viewerID, profile)
 	if err != nil {
 		return PublicProfilePage{}, err
 	}
@@ -170,7 +170,7 @@ func (s Service) loadProfileByHandle(ctx context.Context, viewerID, handle strin
 	return profile, nil
 }
 
-func (s Service) loadProfilePosts(ctx context.Context, profile profileState) ([]Post, error) {
+func (s Service) loadProfilePosts(ctx context.Context, viewerID string, profile profileState) ([]Post, error) {
 	if !profile.CanViewPosts {
 		return []Post{}, nil
 	}
@@ -212,5 +212,5 @@ func (s Service) loadProfilePosts(ctx context.Context, profile profileState) ([]
 	}
 	defer rows.Close()
 
-	return s.loadPostsFromRows(ctx, rows, "profile")
+	return s.loadPostsFromRows(ctx, rows, "profile", viewerID)
 }

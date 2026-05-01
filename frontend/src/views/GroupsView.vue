@@ -1,9 +1,12 @@
 <script setup>
+import { Heart } from "lucide-vue-next"
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { useRouter } from "vue-router"
 
 import {
   acceptGroupJoinRequest,
+  clearGroupCommentReaction,
+  clearGroupPostReaction,
   createGroup,
   createGroupComment,
   createGroupEvent,
@@ -19,7 +22,9 @@ import {
   inviteUserToGroup,
   isApiError,
   joinGroup,
-  respondToGroupEvent
+  respondToGroupEvent,
+  setGroupCommentReaction,
+  setGroupPostReaction
 } from "../services/api"
 import { useAppStore } from "../stores/app"
 import { formatDateTime, formatRelativeTime } from "../utils/date"
@@ -75,6 +80,7 @@ const groupCommentSubmitting = reactive({})
 const groupCommentForms = reactive({})
 const activeGroupPostSlides = reactive({})
 const eventResponseLoading = reactive({})
+const groupReactionLoading = reactive({})
 const createForm = reactive({
   title: "",
   description: ""
@@ -256,6 +262,18 @@ function groupCommentTimestampLabel(comment) {
 
 function commentCountLabel(count) {
   return Number(count || 0) === 1 ? "1 comment" : `${Number(count || 0)} comments`
+}
+
+function reactionCountLabel(count) {
+  return Number(count || 0) === 1 ? "1 like" : `${Number(count || 0)} likes`
+}
+
+function reactionKey(type, id) {
+  return `${type}:${id}`
+}
+
+function hasViewerReaction(target) {
+  return Boolean(target?.viewerReaction)
 }
 
 function normalizedGroupPostMedia(post) {
@@ -482,6 +500,42 @@ function bumpGroupPostCommentsCount(postId, delta) {
   )
 }
 
+function applyGroupPostReaction(postId, reaction) {
+  const normalizedPostId = String(postId || "").trim()
+  if (!normalizedPostId || !reaction) {
+    return
+  }
+
+  groupPosts.value = groupPosts.value.map((post) =>
+    post.id === normalizedPostId
+      ? {
+          ...post,
+          reactionsCount: reaction.reactionsCount ?? post.reactionsCount ?? 0,
+          viewerReaction: reaction.viewerReaction || ""
+        }
+      : post
+  )
+}
+
+function applyGroupCommentReaction(postId, commentId, reaction) {
+  const normalizedPostId = String(postId || "").trim()
+  const normalizedCommentId = String(commentId || "").trim()
+  if (!normalizedPostId || !normalizedCommentId || !reaction) {
+    return
+  }
+
+  ensureGroupCommentState(normalizedPostId)
+  groupCommentsByPost[normalizedPostId] = (groupCommentsByPost[normalizedPostId] || []).map((comment) =>
+    comment.id === normalizedCommentId
+      ? {
+          ...comment,
+          reactionsCount: reaction.reactionsCount ?? comment.reactionsCount ?? 0,
+          viewerReaction: reaction.viewerReaction || ""
+        }
+      : comment
+  )
+}
+
 function ensureGroupCommentState(postId) {
   if (!groupCommentForms[postId]) {
     groupCommentForms[postId] = { body: "" }
@@ -526,6 +580,7 @@ function clearGroupPostsState({ clearComposer = true } = {}) {
   clearReactiveMap(groupCommentErrorByPost)
   clearReactiveMap(groupCommentSubmitting)
   clearReactiveMap(groupCommentForms)
+  clearReactiveMap(groupReactionLoading)
 
   if (clearComposer) {
     resetGroupPostComposer()
@@ -1005,6 +1060,63 @@ async function handleCreateGroupComment(post) {
   }
 }
 
+async function toggleGroupPostReaction(post) {
+  const postId = String(post?.id || "").trim()
+  const groupId = String(selectedGroup.value?.id || "").trim()
+  if (!postId || !groupId) {
+    return
+  }
+
+  const key = reactionKey("group-post", postId)
+  if (groupReactionLoading[key]) {
+    return
+  }
+
+  groupReactionLoading[key] = true
+  groupPostsError.value = ""
+
+  try {
+    const reaction = hasViewerReaction(post)
+      ? await clearGroupPostReaction(groupId, postId)
+      : await setGroupPostReaction(groupId, postId)
+
+    applyGroupPostReaction(postId, reaction)
+  } catch (error) {
+    groupPostsError.value = error instanceof Error ? error.message : "Could not update the reaction."
+  } finally {
+    groupReactionLoading[key] = false
+  }
+}
+
+async function toggleGroupCommentReaction(post, comment) {
+  const postId = String(post?.id || "").trim()
+  const commentId = String(comment?.id || "").trim()
+  const groupId = String(selectedGroup.value?.id || "").trim()
+  if (!postId || !commentId || !groupId) {
+    return
+  }
+
+  const key = reactionKey("group-comment", `${postId}:${commentId}`)
+  if (groupReactionLoading[key]) {
+    return
+  }
+
+  groupReactionLoading[key] = true
+  groupCommentErrorByPost[postId] = ""
+
+  try {
+    const reaction = hasViewerReaction(comment)
+      ? await clearGroupCommentReaction(groupId, postId, commentId)
+      : await setGroupCommentReaction(groupId, postId, commentId)
+
+    applyGroupCommentReaction(postId, commentId, reaction)
+  } catch (error) {
+    groupCommentErrorByPost[postId] = error instanceof Error ? error.message : "Could not update the reaction."
+  } finally {
+    groupReactionLoading[key] = false
+  }
+}
+
 async function handleCreateGroupEvent() {
   const normalizedGroupId = String(selectedGroup.value?.id || "").trim()
   if (!normalizedGroupId) {
@@ -1310,6 +1422,7 @@ watch(
                       <p class="post-card__meta">
                         <span>{{ groupPostTimestampLabel(post) }}</span>
                         <span class="badge badge--neutral">{{ commentCountLabel(post.commentsCount) }}</span>
+                        <span class="badge badge--neutral">{{ reactionCountLabel(post.reactionsCount || 0) }}</span>
                       </p>
                     </div>
                   </div>
@@ -1368,14 +1481,28 @@ watch(
               </div>
 
               <div class="group-post-card__actions">
-                <button
-                  type="button"
-                  class="button button--ghost button--small"
-                  @click="toggleGroupComments(post)"
-                >
-                  {{ groupCommentsExpanded[post.id] ? "Hide comments" : "Show comments" }}
-                </button>
+                <div class="editor-actions">
+                  <button
+                    type="button"
+                    class="reaction-button"
+                    :class="{ 'reaction-button--active': hasViewerReaction(post) }"
+                    :aria-pressed="hasViewerReaction(post)"
+                    :disabled="groupReactionLoading[reactionKey('group-post', post.id)]"
+                    @click="toggleGroupPostReaction(post)"
+                  >
+                    <Heart :size="16" :fill="hasViewerReaction(post) ? 'currentColor' : 'none'" aria-hidden="true" />
+                    <span>{{ hasViewerReaction(post) ? "Liked" : "Like" }}</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="button button--ghost button--small"
+                    @click="toggleGroupComments(post)"
+                  >
+                    {{ groupCommentsExpanded[post.id] ? "Hide comments" : "Show comments" }}
+                  </button>
+                </div>
                 <p class="feed-note">{{ commentCountLabel(post.commentsCount) }}</p>
+                <p class="feed-note">{{ reactionCountLabel(post.reactionsCount || 0) }}</p>
               </div>
 
               <div v-if="groupCommentsExpanded[post.id]" class="post-comments">
@@ -1397,6 +1524,20 @@ watch(
                       <span>{{ groupCommentTimestampLabel(comment) }}</span>
                     </div>
                     <p class="comment-card__body">{{ comment.body }}</p>
+                    <div class="comment-card__actions">
+                      <button
+                        type="button"
+                        class="reaction-button reaction-button--compact"
+                        :class="{ 'reaction-button--active': hasViewerReaction(comment) }"
+                        :aria-pressed="hasViewerReaction(comment)"
+                        :disabled="groupReactionLoading[reactionKey('group-comment', `${post.id}:${comment.id}`)]"
+                        @click="toggleGroupCommentReaction(post, comment)"
+                      >
+                        <Heart :size="15" :fill="hasViewerReaction(comment) ? 'currentColor' : 'none'" aria-hidden="true" />
+                        <span>{{ hasViewerReaction(comment) ? "Liked" : "Like" }}</span>
+                      </button>
+                      <span class="feed-note">{{ reactionCountLabel(comment.reactionsCount || 0) }}</span>
+                    </div>
                   </article>
                 </div>
 

@@ -6,6 +6,7 @@ import {
   fetchChatConversations,
   fetchDiscoverUsers,
   fetchGroup,
+  fetchGroupMembers,
   fetchGroupMessages,
   fetchGroups,
   fetchNotifications,
@@ -28,11 +29,13 @@ const groupChats = ref([])
 const discoverUsers = ref([])
 const conversationUser = ref(null)
 const activeGroup = ref(null)
+const groupMembers = ref([])
 const messages = ref([])
 const pageError = ref("")
 const threadError = ref("")
 const isLoadingSidebar = ref(false)
 const isLoadingThread = ref(false)
+const isLoadingGroupMembers = ref(false)
 const isSendingMessage = ref(false)
 const isLoadingHistory = ref(false)
 const historyHasMore = ref(false)
@@ -100,6 +103,15 @@ function userInitials(user) {
 
 function groupInitials(group) {
   return initialsFromText(group?.title, "G")
+}
+
+function groupMemberCountLabel(group = activeGroup.value) {
+  const count = group?.membersCount || groupMembers.value.length || 0
+  return `${count} ${count === 1 ? "member" : "members"}`
+}
+
+function groupMemberRoleLabel(member) {
+  return member?.role === "creator" ? "Creator" : "Member"
 }
 
 function isMine(message) {
@@ -644,6 +656,8 @@ async function loadConversation(userId) {
 
   if (!normalizedUserId) {
     conversationUser.value = null
+    groupMembers.value = []
+    isLoadingGroupMembers.value = false
     messages.value = []
     threadError.value = ""
     historyHasMore.value = false
@@ -659,6 +673,8 @@ async function loadConversation(userId) {
   activeHistoryRequestId.value = ""
   messages.value = []
   activeGroup.value = null
+  groupMembers.value = []
+  isLoadingGroupMembers.value = false
   conversationUser.value = knownConversationUser(normalizedUserId)
 
   requestConversationHistory(normalizedUserId, {
@@ -672,6 +688,8 @@ async function loadGroupThread(groupId) {
 
   if (!normalizedGroupId) {
     activeGroup.value = null
+    groupMembers.value = []
+    isLoadingGroupMembers.value = false
     messages.value = []
     threadError.value = ""
     historyHasMore.value = false
@@ -686,12 +704,15 @@ async function loadGroupThread(groupId) {
   historyHasMore.value = false
   activeHistoryRequestId.value = ""
   messages.value = []
+  groupMembers.value = []
   conversationUser.value = null
   activeGroup.value = knownGroup(normalizedGroupId)
+  isLoadingGroupMembers.value = true
 
   try {
-    const [group, groupMessages] = await Promise.all([
+    const [group, members, groupMessages] = await Promise.all([
       activeGroup.value ? Promise.resolve(activeGroup.value) : fetchGroup(normalizedGroupId),
+      fetchGroupMembers(normalizedGroupId),
       fetchGroupMessages(normalizedGroupId)
     ])
 
@@ -700,6 +721,7 @@ async function loadGroupThread(groupId) {
     }
 
     activeGroup.value = group
+    groupMembers.value = members
     replaceMessageHistory(groupMessages)
     if (groupMessages.length) {
       patchGroupChatSummary(normalizedGroupId, groupMessages[groupMessages.length - 1])
@@ -714,6 +736,7 @@ async function loadGroupThread(groupId) {
   } finally {
     if (sameConversation(activeGroupId.value, normalizedGroupId)) {
       isLoadingThread.value = false
+      isLoadingGroupMembers.value = false
     }
   }
 }
@@ -939,6 +962,8 @@ watch(
       discoverUsers.value = []
       conversationUser.value = null
       activeGroup.value = null
+      groupMembers.value = []
+      isLoadingGroupMembers.value = false
       messages.value = []
       composer.body = ""
       return
@@ -972,6 +997,8 @@ watch(
     }
 
     activeGroup.value = null
+    groupMembers.value = []
+    isLoadingGroupMembers.value = false
     void loadConversation(routeConversationUserId(queryUser))
   },
   { immediate: true }
@@ -1174,9 +1201,45 @@ onBeforeUnmount(() => {
 
                 <div>
                   <h3>{{ activeGroup?.title || "Group chat" }}</h3>
-                  <p class="feed-note">
-                    {{ activeGroup ? `${activeGroup.membersCount || 0} members` : "Loading group chat..." }}
-                  </p>
+                  <div class="chat-members" tabindex="0">
+                    <p class="feed-note chat-members__trigger">
+                      {{ activeGroup ? groupMemberCountLabel(activeGroup) : "Loading group chat..." }}
+                    </p>
+
+                    <div v-if="activeGroup" class="chat-members__popover" role="tooltip">
+                      <div class="chat-members__popover-head">
+                        <strong>Group members</strong>
+                        <span>{{ isLoadingGroupMembers ? "Loading..." : groupMemberCountLabel(activeGroup) }}</span>
+                      </div>
+
+                      <div class="chat-members__list">
+                        <div
+                          v-for="member in groupMembers"
+                          :key="member.id"
+                          class="chat-members__item"
+                        >
+                          <span class="user-avatar user-avatar--small">
+                            <img
+                              v-if="member.avatarUrl"
+                              :src="member.avatarUrl"
+                              :alt="`${displayName(member)} avatar`"
+                              class="user-avatar__image"
+                            />
+                            <span v-else class="user-avatar__fallback">{{ userInitials(member) }}</span>
+                          </span>
+
+                          <span class="chat-members__details">
+                            <strong>{{ displayName(member) }}</strong>
+                            <small>{{ groupMemberRoleLabel(member) }}</small>
+                          </span>
+                        </div>
+
+                        <p v-if="!isLoadingGroupMembers && !groupMembers.length" class="feed-note">
+                          No members loaded.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 

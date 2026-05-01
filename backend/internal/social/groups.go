@@ -41,6 +41,12 @@ type Group struct {
 	Creator              GroupUser `json:"creator"`
 }
 
+type GroupMember struct {
+	GroupUser
+	Role     string    `json:"role"`
+	JoinedAt time.Time `json:"joinedAt"`
+}
+
 type CreateGroupInput struct {
 	Title       string
 	Description string
@@ -191,6 +197,72 @@ func (s Service) CreateGroup(ctx context.Context, creator auth.User, input Creat
 
 func (s Service) GroupByID(ctx context.Context, viewerID, groupID string) (Group, error) {
 	return s.loadGroupByIDWithReader(ctx, s.db, viewerID, groupID)
+}
+
+func (s Service) GroupMembers(ctx context.Context, viewerID, groupID string) ([]GroupMember, error) {
+	normalizedGroupID, err := s.requireGroupMembership(ctx, s.db, viewerID, groupID)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.QueryContext(
+		ctx,
+		`
+			SELECT
+				u.id,
+				u.first_name,
+				u.last_name,
+				u.nickname,
+				u.avatar_url,
+				gm.role,
+				gm.joined_at
+			FROM group_memberships gm
+			INNER JOIN users u ON u.id = gm.user_id
+			WHERE gm.group_id = $1
+			ORDER BY
+				CASE WHEN gm.role = 'creator' THEN 0 ELSE 1 END,
+				gm.joined_at ASC,
+				LOWER(COALESCE(NULLIF(u.nickname, ''), u.first_name || ' ' || u.last_name)) ASC
+		`,
+		normalizedGroupID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query group members: %w", err)
+	}
+	defer rows.Close()
+
+	members := make([]GroupMember, 0)
+	for rows.Next() {
+		var (
+			member    GroupMember
+			nickname  sql.NullString
+			avatarURL sql.NullString
+		)
+		if err := rows.Scan(
+			&member.ID,
+			&member.FirstName,
+			&member.LastName,
+			&nickname,
+			&avatarURL,
+			&member.Role,
+			&member.JoinedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan group member: %w", err)
+		}
+
+		member.Nickname = nullStringValue(nickname)
+		if avatarURL.Valid {
+			member.AvatarURL = s.publicURL(avatarURL.String)
+		}
+
+		members = append(members, member)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate group members: %w", err)
+	}
+
+	return members, nil
 }
 
 func (s Service) JoinGroup(ctx context.Context, userID, groupID string) (Group, error) {

@@ -31,6 +31,8 @@ type Comment struct {
 	UpdatedAt       time.Time  `json:"updatedAt"`
 	ParentCommentID string     `json:"parentCommentId,omitempty"`
 	Depth           int        `json:"depth"`
+	ReactionsCount  int        `json:"reactionsCount"`
+	ViewerReaction  string     `json:"viewerReaction,omitempty"`
 	Author          PostAuthor `json:"author"`
 	Replies         []Comment  `json:"replies"`
 }
@@ -124,6 +126,7 @@ func (s Service) Comments(ctx context.Context, viewerID, postID string) ([]Comme
 
 	ordered := make([]*Comment, 0)
 	commentsByID := make(map[string]*Comment)
+	commentIDs := make([]string, 0)
 
 	for rows.Next() {
 		var item Comment
@@ -151,10 +154,22 @@ func (s Service) Comments(ctx context.Context, viewerID, postID string) ([]Comme
 		comment := item
 		ordered = append(ordered, &comment)
 		commentsByID[comment.ID] = &comment
+		commentIDs = append(commentIDs, comment.ID)
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate comments: %w", err)
+	}
+
+	reactionsByCommentID, err := s.loadReactionSummaries(ctx, commentReactionTarget, viewerID, commentIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, comment := range ordered {
+		reactionSummary := reactionsByCommentID[comment.ID]
+		comment.ReactionsCount = reactionSummary.Count
+		comment.ViewerReaction = reactionSummary.ViewerReaction
 	}
 
 	topLevel := make([]*Comment, 0)
@@ -413,6 +428,12 @@ func (s Service) UpdateComment(ctx context.Context, author auth.User, postID, co
 		return Comment{}, fmt.Errorf("update comment: %w", err)
 	}
 
+	reactionsByCommentID, err := s.loadReactionSummaries(ctx, commentReactionTarget, author.ID, []string{commentID})
+	if err != nil {
+		return Comment{}, err
+	}
+
+	reactionSummary := reactionsByCommentID[commentID]
 	comment := Comment{
 		ID:              commentID,
 		Body:            normalizedInput.Body,
@@ -420,6 +441,8 @@ func (s Service) UpdateComment(ctx context.Context, author auth.User, postID, co
 		UpdatedAt:       updatedAt,
 		ParentCommentID: existingComment.ParentCommentID,
 		Depth:           existingComment.Depth(),
+		ReactionsCount:  reactionSummary.Count,
+		ViewerReaction:  reactionSummary.ViewerReaction,
 		Author: PostAuthor{
 			ID:                author.ID,
 			FirstName:         author.FirstName,

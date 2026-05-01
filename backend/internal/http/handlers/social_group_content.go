@@ -165,6 +165,23 @@ func (h SocialHandler) HandleGroupMessages(w stdlibhttp.ResponseWriter, r *stdli
 	})
 }
 
+func (h SocialHandler) HandleGroupMembers(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	currentUser, ok := h.requireCurrentUser(w, r)
+	if !ok {
+		return
+	}
+
+	members, err := h.service.GroupMembers(r.Context(), currentUser.ID, strings.TrimSpace(r.PathValue("groupID")))
+	if err != nil {
+		h.handleSocialError(w, err)
+		return
+	}
+
+	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
+		"members": members,
+	})
+}
+
 func (h SocialHandler) HandleSendGroupMessage(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
 	currentUser, ok := h.requireCurrentUser(w, r)
 	if !ok {

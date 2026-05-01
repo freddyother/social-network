@@ -72,6 +72,14 @@ function normalizeGroup(group) {
   }
 }
 
+function normalizeGroupMember(member) {
+  if (!member) {
+    return null
+  }
+
+  return normalizeUser(member)
+}
+
 function normalizeGroupPost(post) {
   if (!post) {
     return null
@@ -262,6 +270,11 @@ export async function fetchGroup(groupId) {
   return normalizeGroup(payload?.group || null)
 }
 
+export async function fetchGroupMembers(groupId) {
+  const payload = await request(`/groups/${groupId}/members`, { method: "GET" })
+  return (payload?.members || []).map(normalizeGroupMember).filter(Boolean)
+}
+
 export async function createGroup(group) {
   const payload = await request("/groups", {
     method: "POST",
@@ -305,6 +318,23 @@ export async function fetchGroupPosts(groupId) {
   return (payload?.posts || []).map(normalizeGroupPost)
 }
 
+export async function setGroupPostReaction(groupId, postId, reaction = "like") {
+  const payload = await request(`/groups/${groupId}/posts/${postId}/reaction`, {
+    method: "PUT",
+    body: JSON.stringify({ reaction })
+  })
+
+  return payload?.reaction || null
+}
+
+export async function clearGroupPostReaction(groupId, postId) {
+  const payload = await request(`/groups/${groupId}/posts/${postId}/reaction`, {
+    method: "DELETE"
+  })
+
+  return payload?.reaction || null
+}
+
 export async function createGroupPost(groupId, post) {
   const formData = new FormData()
   formData.set("body", post.body || "")
@@ -333,6 +363,23 @@ export async function createGroupComment(groupId, postId, comment) {
   })
 
   return normalizeGroupComment(payload?.comment || null)
+}
+
+export async function setGroupCommentReaction(groupId, postId, commentId, reaction = "like") {
+  const payload = await request(`/groups/${groupId}/posts/${postId}/comments/${commentId}/reaction`, {
+    method: "PUT",
+    body: JSON.stringify({ reaction })
+  })
+
+  return payload?.reaction || null
+}
+
+export async function clearGroupCommentReaction(groupId, postId, commentId) {
+  const payload = await request(`/groups/${groupId}/posts/${postId}/comments/${commentId}/reaction`, {
+    method: "DELETE"
+  })
+
+  return payload?.reaction || null
 }
 
 export async function fetchGroupEvents(groupId) {
@@ -438,6 +485,23 @@ export async function fetchComments(postId) {
   return payload?.comments || []
 }
 
+export async function setPostReaction(postId, reaction = "like") {
+  const payload = await request(`/posts/${postId}/reaction`, {
+    method: "PUT",
+    body: JSON.stringify({ reaction })
+  })
+
+  return payload?.reaction || null
+}
+
+export async function clearPostReaction(postId) {
+  const payload = await request(`/posts/${postId}/reaction`, {
+    method: "DELETE"
+  })
+
+  return payload?.reaction || null
+}
+
 export async function createPost(post) {
   const formData = new FormData()
   formData.set("title", post.title)
@@ -485,6 +549,23 @@ export async function updateComment(postId, commentId, comment) {
   })
 
   return payload?.comment || null
+}
+
+export async function setCommentReaction(postId, commentId, reaction = "like") {
+  const payload = await request(`/posts/${postId}/comments/${commentId}/reaction`, {
+    method: "PUT",
+    body: JSON.stringify({ reaction })
+  })
+
+  return payload?.reaction || null
+}
+
+export async function clearCommentReaction(postId, commentId) {
+  const payload = await request(`/posts/${postId}/comments/${commentId}/reaction`, {
+    method: "DELETE"
+  })
+
+  return payload?.reaction || null
 }
 
 export async function fetchDiscoverUsers() {

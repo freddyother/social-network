@@ -13,12 +13,14 @@ import (
 const maxGroupCommentBodyLength = 1000
 
 type GroupComment struct {
-	ID          string    `json:"id"`
-	GroupID     string    `json:"groupId"`
-	GroupPostID string    `json:"groupPostId"`
-	Body        string    `json:"body"`
-	CreatedAt   time.Time `json:"createdAt"`
-	Author      GroupUser `json:"author"`
+	ID             string    `json:"id"`
+	GroupID        string    `json:"groupId"`
+	GroupPostID    string    `json:"groupPostId"`
+	Body           string    `json:"body"`
+	CreatedAt      time.Time `json:"createdAt"`
+	ReactionsCount int       `json:"reactionsCount"`
+	ViewerReaction string    `json:"viewerReaction,omitempty"`
+	Author         GroupUser `json:"author"`
 }
 
 type CreateGroupCommentInput struct {
@@ -64,7 +66,7 @@ func (s Service) GroupComments(ctx context.Context, viewerID, groupID, groupPost
 	}
 	defer rows.Close()
 
-	return s.loadGroupCommentsFromRows(rows, "group comments")
+	return s.loadGroupCommentsFromRows(ctx, rows, "group comments", viewerID)
 }
 
 func (s Service) CreateGroupComment(ctx context.Context, author auth.User, groupID, groupPostID string, input CreateGroupCommentInput) (GroupComment, error) {
@@ -152,8 +154,9 @@ func (s Service) CreateGroupComment(ctx context.Context, author auth.User, group
 	}, nil
 }
 
-func (s Service) loadGroupCommentsFromRows(rows *sql.Rows, operation string) ([]GroupComment, error) {
+func (s Service) loadGroupCommentsFromRows(ctx context.Context, rows *sql.Rows, operation, viewerID string) ([]GroupComment, error) {
 	comments := make([]GroupComment, 0)
+	commentIDs := make([]string, 0)
 
 	for rows.Next() {
 		var (
@@ -182,10 +185,22 @@ func (s Service) loadGroupCommentsFromRows(rows *sql.Rows, operation string) ([]
 		}
 
 		comments = append(comments, comment)
+		commentIDs = append(commentIDs, comment.ID)
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate %s group comments: %w", operation, err)
+	}
+
+	reactionsByCommentID, err := s.loadReactionSummaries(ctx, groupCommentReactionTarget, viewerID, commentIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	for index := range comments {
+		reactionSummary := reactionsByCommentID[comments[index].ID]
+		comments[index].ReactionsCount = reactionSummary.Count
+		comments[index].ViewerReaction = reactionSummary.ViewerReaction
 	}
 
 	return comments, nil

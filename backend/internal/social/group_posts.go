@@ -30,15 +30,17 @@ type GroupPostMedia struct {
 }
 
 type GroupPost struct {
-	ID            string           `json:"id"`
-	GroupID       string           `json:"groupId"`
-	Body          string           `json:"body"`
-	ImageURL      string           `json:"imageUrl,omitempty"`
-	Media         []GroupPostMedia `json:"media"`
-	CreatedAt     time.Time        `json:"createdAt"`
-	UpdatedAt     time.Time        `json:"updatedAt"`
-	CommentsCount int              `json:"commentsCount"`
-	Author        GroupUser        `json:"author"`
+	ID             string           `json:"id"`
+	GroupID        string           `json:"groupId"`
+	Body           string           `json:"body"`
+	ImageURL       string           `json:"imageUrl,omitempty"`
+	Media          []GroupPostMedia `json:"media"`
+	CreatedAt      time.Time        `json:"createdAt"`
+	UpdatedAt      time.Time        `json:"updatedAt"`
+	CommentsCount  int              `json:"commentsCount"`
+	ReactionsCount int              `json:"reactionsCount"`
+	ViewerReaction string           `json:"viewerReaction,omitempty"`
+	Author         GroupUser        `json:"author"`
 }
 
 func (s Service) GroupPosts(ctx context.Context, viewerID, groupID string) ([]GroupPost, error) {
@@ -81,7 +83,7 @@ func (s Service) GroupPosts(ctx context.Context, viewerID, groupID string) ([]Gr
 	}
 	defer rows.Close()
 
-	return s.loadGroupPostsFromRows(ctx, rows, "group timeline")
+	return s.loadGroupPostsFromRows(ctx, rows, "group timeline", viewerID)
 }
 
 func (s Service) CreateGroupPost(ctx context.Context, author auth.User, groupID string, input CreateGroupPostInput) (GroupPost, error) {
@@ -227,7 +229,7 @@ func (s Service) requireGroupMembership(ctx context.Context, reader sqlReader, u
 	return normalizedGroupID, nil
 }
 
-func (s Service) loadGroupPostsFromRows(ctx context.Context, rows *sql.Rows, operation string) ([]GroupPost, error) {
+func (s Service) loadGroupPostsFromRows(ctx context.Context, rows *sql.Rows, operation, viewerID string) ([]GroupPost, error) {
 	posts := make([]GroupPost, 0)
 	postIDs := make([]string, 0)
 
@@ -276,8 +278,16 @@ func (s Service) loadGroupPostsFromRows(ctx context.Context, rows *sql.Rows, ope
 		return nil, err
 	}
 
+	reactionsByPostID, err := s.loadReactionSummaries(ctx, groupPostReactionTarget, viewerID, postIDs)
+	if err != nil {
+		return nil, err
+	}
+
 	for index := range posts {
+		reactionSummary := reactionsByPostID[posts[index].ID]
 		posts[index].Media = mediaByPostID[posts[index].ID]
+		posts[index].ReactionsCount = reactionSummary.Count
+		posts[index].ViewerReaction = reactionSummary.ViewerReaction
 		if len(posts[index].Media) == 0 && posts[index].ImageURL != "" {
 			posts[index].Media = []GroupPostMedia{
 				{

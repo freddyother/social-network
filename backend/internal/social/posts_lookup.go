@@ -48,7 +48,7 @@ func (s Service) PostByID(ctx context.Context, viewerID, postID string) (Post, e
 	}
 	defer rows.Close()
 
-	posts, err := s.loadPostsFromRows(ctx, rows, "single post")
+	posts, err := s.loadPostsFromRows(ctx, rows, "single post", viewerID)
 	if err != nil {
 		return Post{}, err
 	}

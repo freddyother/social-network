@@ -204,7 +204,7 @@ func (s Service) searchPosts(ctx context.Context, viewerID, query string) ([]Pos
 	}
 	defer rows.Close()
 
-	return s.loadPostsFromRows(ctx, rows, "search")
+	return s.loadPostsFromRows(ctx, rows, "search", viewerID)
 }
 
 func (s Service) searchGroups(ctx context.Context, viewerID, query string) ([]Group, error) {
