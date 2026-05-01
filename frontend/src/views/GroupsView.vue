@@ -1504,6 +1504,7 @@ watch(
                     >
                       <Heart :size="16" :fill="hasViewerReaction(post) ? 'currentColor' : 'none'" aria-hidden="true" />
                     </button>
+                    <span class="reaction-count">{{ reactionCountLabel(post.reactionsCount || 0) }}</span>
                     <span v-if="post.reactionsCount" class="reaction-popover" role="tooltip">
                       <strong>People</strong>
                       <span v-for="user in reactionUsers(post)" :key="user.id">{{ displayName(user) }}</span>
@@ -1519,7 +1520,6 @@ watch(
                   </button>
                 </div>
                 <p class="feed-note">{{ commentCountLabel(post.commentsCount) }}</p>
-                <p class="feed-note">{{ reactionCountLabel(post.reactionsCount || 0) }}</p>
               </div>
 
               <div v-if="groupCommentsExpanded[post.id]" class="post-comments">
