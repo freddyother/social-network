@@ -276,6 +276,14 @@ function hasViewerReaction(target) {
   return Boolean(target?.viewerReaction)
 }
 
+function reactionUsers(target) {
+  return Array.isArray(target?.reactionUsers) ? target.reactionUsers : []
+}
+
+function reactionOverflowCount(target) {
+  return Math.max(0, Number(target?.reactionsCount || 0) - reactionUsers(target).length)
+}
+
 function normalizedGroupPostMedia(post) {
   if (post?.media?.length) {
     return post.media
@@ -511,7 +519,8 @@ function applyGroupPostReaction(postId, reaction) {
       ? {
           ...post,
           reactionsCount: reaction.reactionsCount ?? post.reactionsCount ?? 0,
-          viewerReaction: reaction.viewerReaction || ""
+          viewerReaction: reaction.viewerReaction || "",
+          reactionUsers: Array.isArray(reaction.reactionUsers) ? reaction.reactionUsers : []
         }
       : post
   )
@@ -530,7 +539,8 @@ function applyGroupCommentReaction(postId, commentId, reaction) {
       ? {
           ...comment,
           reactionsCount: reaction.reactionsCount ?? comment.reactionsCount ?? 0,
-          viewerReaction: reaction.viewerReaction || ""
+          viewerReaction: reaction.viewerReaction || "",
+          reactionUsers: Array.isArray(reaction.reactionUsers) ? reaction.reactionUsers : []
         }
       : comment
   )
@@ -1482,17 +1492,24 @@ watch(
 
               <div class="group-post-card__actions">
                 <div class="editor-actions">
-                  <button
-                    type="button"
-                    class="reaction-button"
-                    :class="{ 'reaction-button--active': hasViewerReaction(post) }"
-                    :aria-pressed="hasViewerReaction(post)"
-                    :disabled="groupReactionLoading[reactionKey('group-post', post.id)]"
-                    @click="toggleGroupPostReaction(post)"
-                  >
-                    <Heart :size="16" :fill="hasViewerReaction(post) ? 'currentColor' : 'none'" aria-hidden="true" />
-                    <span>{{ hasViewerReaction(post) ? "Liked" : "Like" }}</span>
-                  </button>
+                  <span class="reaction-hover">
+                    <button
+                      type="button"
+                      class="reaction-button"
+                      :class="{ 'reaction-button--active': hasViewerReaction(post) }"
+                      :aria-pressed="hasViewerReaction(post)"
+                      :disabled="groupReactionLoading[reactionKey('group-post', post.id)]"
+                      @click="toggleGroupPostReaction(post)"
+                    >
+                      <Heart :size="16" :fill="hasViewerReaction(post) ? 'currentColor' : 'none'" aria-hidden="true" />
+                      <span>{{ hasViewerReaction(post) ? "Liked" : "Like" }}</span>
+                    </button>
+                    <span v-if="post.reactionsCount" class="reaction-popover" role="tooltip">
+                      <strong>Liked by</strong>
+                      <span v-for="user in reactionUsers(post)" :key="user.id">{{ displayName(user) }}</span>
+                      <span v-if="reactionOverflowCount(post)">and {{ reactionOverflowCount(post) }} more</span>
+                    </span>
+                  </span>
                   <button
                     type="button"
                     class="button button--ghost button--small"
@@ -1523,20 +1540,33 @@ watch(
                       </div>
                       <span>{{ groupCommentTimestampLabel(comment) }}</span>
                     </div>
-                    <p class="comment-card__body">{{ comment.body }}</p>
+                    <div class="comment-card__content">
+                      <p class="comment-card__body">{{ comment.body }}</p>
+                      <span class="reaction-hover reaction-hover--inline">
+                        <button
+                          type="button"
+                          class="reaction-icon-button"
+                          :class="{ 'reaction-icon-button--active': hasViewerReaction(comment) }"
+                          :aria-pressed="hasViewerReaction(comment)"
+                          :aria-label="hasViewerReaction(comment) ? 'Unlike comment' : 'Like comment'"
+                          :disabled="groupReactionLoading[reactionKey('group-comment', `${post.id}:${comment.id}`)]"
+                          @click="toggleGroupCommentReaction(post, comment)"
+                        >
+                          <Heart :size="16" :fill="hasViewerReaction(comment) ? 'currentColor' : 'none'" aria-hidden="true" />
+                        </button>
+                        <span v-if="comment.reactionsCount" class="reaction-popover reaction-popover--right" role="tooltip">
+                          <strong>Liked by</strong>
+                          <span v-for="user in reactionUsers(comment)" :key="user.id">{{ displayName(user) }}</span>
+                          <span v-if="reactionOverflowCount(comment)">and {{ reactionOverflowCount(comment) }} more</span>
+                        </span>
+                      </span>
+                    </div>
                     <div class="comment-card__actions">
-                      <button
-                        type="button"
-                        class="reaction-button reaction-button--compact"
-                        :class="{ 'reaction-button--active': hasViewerReaction(comment) }"
-                        :aria-pressed="hasViewerReaction(comment)"
-                        :disabled="groupReactionLoading[reactionKey('group-comment', `${post.id}:${comment.id}`)]"
-                        @click="toggleGroupCommentReaction(post, comment)"
-                      >
-                        <Heart :size="15" :fill="hasViewerReaction(comment) ? 'currentColor' : 'none'" aria-hidden="true" />
-                        <span>{{ hasViewerReaction(comment) ? "Liked" : "Like" }}</span>
-                      </button>
-                      <span class="feed-note">{{ reactionCountLabel(comment.reactionsCount || 0) }}</span>
+                      <div class="comment-card__meta-line">
+                        <span v-if="comment.reactionsCount" class="comment-card__likes">
+                          {{ reactionCountLabel(comment.reactionsCount || 0) }}
+                        </span>
+                      </div>
                     </div>
                   </article>
                 </div>

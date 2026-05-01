@@ -2,6 +2,7 @@ package social
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 
@@ -34,15 +35,25 @@ var (
 )
 
 type ReactionResult struct {
-	TargetType     string `json:"targetType"`
-	TargetID       string `json:"targetId"`
-	ReactionsCount int    `json:"reactionsCount"`
-	ViewerReaction string `json:"viewerReaction,omitempty"`
+	TargetType     string         `json:"targetType"`
+	TargetID       string         `json:"targetId"`
+	ReactionsCount int            `json:"reactionsCount"`
+	ViewerReaction string         `json:"viewerReaction,omitempty"`
+	ReactionUsers  []ReactionUser `json:"reactionUsers"`
+}
+
+type ReactionUser struct {
+	ID        string `json:"id"`
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"`
+	Nickname  string `json:"nickname,omitempty"`
+	AvatarURL string `json:"avatarUrl,omitempty"`
 }
 
 type reactionSummary struct {
 	Count          int
 	ViewerReaction string
+	Users          []ReactionUser
 }
 
 type reactionTargetConfig struct {
@@ -287,6 +298,7 @@ func (s Service) loadReactionResult(ctx context.Context, target reactionTargetCo
 		TargetID:       targetID,
 		ReactionsCount: summary.Count,
 		ViewerReaction: summary.ViewerReaction,
+		ReactionUsers:  ensureReactionUsers(summary.Users),
 	}, nil
 }
 
@@ -332,7 +344,7 @@ func (s Service) loadReactionSummaries(ctx context.Context, target reactionTarge
 	}
 
 	if strings.TrimSpace(viewerID) == "" {
-		return summariesByID, nil
+		return s.loadReactionUsers(ctx, target, targetIDs, summariesByID)
 	}
 
 	viewerQuery := fmt.Sprintf(
@@ -368,6 +380,76 @@ func (s Service) loadReactionSummaries(ctx context.Context, target reactionTarge
 		return nil, fmt.Errorf("iterate %s viewer reactions: %w", target.TargetType, err)
 	}
 
+	return s.loadReactionUsers(ctx, target, targetIDs, summariesByID)
+}
+
+func (s Service) loadReactionUsers(ctx context.Context, target reactionTargetConfig, targetIDs []string, summariesByID map[string]reactionSummary) (map[string]reactionSummary, error) {
+	usersQuery := fmt.Sprintf(
+		`
+			SELECT
+				reactions.target_id,
+				u.id,
+				u.first_name,
+				u.last_name,
+				u.nickname,
+				u.avatar_url
+			FROM (
+				SELECT
+					%s AS target_id,
+					user_id,
+					ROW_NUMBER() OVER (
+						PARTITION BY %s
+						ORDER BY updated_at DESC, user_id DESC
+					) AS row_number
+				FROM %s
+				WHERE %s = ANY($1)
+			) reactions
+			INNER JOIN users u ON u.id = reactions.user_id
+			WHERE reactions.row_number <= 8
+			ORDER BY reactions.target_id, reactions.row_number
+		`,
+		target.TargetColumn,
+		target.TargetColumn,
+		target.Table,
+		target.TargetColumn,
+	)
+
+	rows, err := s.db.QueryContext(ctx, usersQuery, pq.Array(targetIDs))
+	if err != nil {
+		return nil, fmt.Errorf("query %s reaction users: %w", target.TargetType, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var targetID string
+		var user ReactionUser
+		var nickname sql.NullString
+		var avatarURL sql.NullString
+		if err := rows.Scan(
+			&targetID,
+			&user.ID,
+			&user.FirstName,
+			&user.LastName,
+			&nickname,
+			&avatarURL,
+		); err != nil {
+			return nil, fmt.Errorf("scan %s reaction user: %w", target.TargetType, err)
+		}
+
+		user.Nickname = nullStringValue(nickname)
+		if avatarURL.Valid {
+			user.AvatarURL = s.publicURL(avatarURL.String)
+		}
+
+		summary := summariesByID[targetID]
+		summary.Users = append(summary.Users, user)
+		summariesByID[targetID] = summary
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate %s reaction users: %w", target.TargetType, err)
+	}
+
 	return summariesByID, nil
 }
 
@@ -387,4 +469,12 @@ func normalizeReactionType(reactionType string) (string, error) {
 	}
 
 	return normalized, nil
+}
+
+func ensureReactionUsers(users []ReactionUser) []ReactionUser {
+	if users == nil {
+		return []ReactionUser{}
+	}
+
+	return users
 }

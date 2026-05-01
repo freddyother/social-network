@@ -77,17 +77,18 @@ type PostMedia struct {
 }
 
 type Post struct {
-	ID             string      `json:"id"`
-	Title          string      `json:"title"`
-	Body           string      `json:"body"`
-	Privacy        string      `json:"privacy"`
-	CreatedAt      time.Time   `json:"createdAt"`
-	UpdatedAt      time.Time   `json:"updatedAt"`
-	CommentsCount  int         `json:"commentsCount"`
-	ReactionsCount int         `json:"reactionsCount"`
-	ViewerReaction string      `json:"viewerReaction,omitempty"`
-	Author         PostAuthor  `json:"author"`
-	Media          []PostMedia `json:"media"`
+	ID             string         `json:"id"`
+	Title          string         `json:"title"`
+	Body           string         `json:"body"`
+	Privacy        string         `json:"privacy"`
+	CreatedAt      time.Time      `json:"createdAt"`
+	UpdatedAt      time.Time      `json:"updatedAt"`
+	CommentsCount  int            `json:"commentsCount"`
+	ReactionsCount int            `json:"reactionsCount"`
+	ViewerReaction string         `json:"viewerReaction,omitempty"`
+	ReactionUsers  []ReactionUser `json:"reactionUsers"`
+	Author         PostAuthor     `json:"author"`
+	Media          []PostMedia    `json:"media"`
 }
 
 type SuggestedUser struct {
@@ -323,6 +324,7 @@ func (s Service) UpdatePost(ctx context.Context, author auth.User, postID string
 		CommentsCount:  commentCountsByPostID[postID],
 		ReactionsCount: reactionSummary.Count,
 		ViewerReaction: reactionSummary.ViewerReaction,
+		ReactionUsers:  ensureReactionUsers(reactionSummary.Users),
 	}
 
 	s.publisher.PublishToPost(postID, "post.updated", PostEvent{
@@ -1260,6 +1262,7 @@ func (s Service) loadPostsFromRows(ctx context.Context, rows *sql.Rows, operatio
 		posts[index].CommentsCount = commentCountsByPostID[posts[index].ID]
 		posts[index].ReactionsCount = reactionSummary.Count
 		posts[index].ViewerReaction = reactionSummary.ViewerReaction
+		posts[index].ReactionUsers = ensureReactionUsers(reactionSummary.Users)
 	}
 
 	return posts, nil

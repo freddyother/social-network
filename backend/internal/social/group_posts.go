@@ -40,6 +40,7 @@ type GroupPost struct {
 	CommentsCount  int              `json:"commentsCount"`
 	ReactionsCount int              `json:"reactionsCount"`
 	ViewerReaction string           `json:"viewerReaction,omitempty"`
+	ReactionUsers  []ReactionUser   `json:"reactionUsers"`
 	Author         GroupUser        `json:"author"`
 }
 
@@ -288,6 +289,7 @@ func (s Service) loadGroupPostsFromRows(ctx context.Context, rows *sql.Rows, ope
 		posts[index].Media = mediaByPostID[posts[index].ID]
 		posts[index].ReactionsCount = reactionSummary.Count
 		posts[index].ViewerReaction = reactionSummary.ViewerReaction
+		posts[index].ReactionUsers = ensureReactionUsers(reactionSummary.Users)
 		if len(posts[index].Media) == 0 && posts[index].ImageURL != "" {
 			posts[index].Media = []GroupPostMedia{
 				{

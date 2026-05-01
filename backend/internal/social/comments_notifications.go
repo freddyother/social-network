@@ -25,16 +25,17 @@ type UpdateCommentInput struct {
 }
 
 type Comment struct {
-	ID              string     `json:"id"`
-	Body            string     `json:"body"`
-	CreatedAt       time.Time  `json:"createdAt"`
-	UpdatedAt       time.Time  `json:"updatedAt"`
-	ParentCommentID string     `json:"parentCommentId,omitempty"`
-	Depth           int        `json:"depth"`
-	ReactionsCount  int        `json:"reactionsCount"`
-	ViewerReaction  string     `json:"viewerReaction,omitempty"`
-	Author          PostAuthor `json:"author"`
-	Replies         []Comment  `json:"replies"`
+	ID              string         `json:"id"`
+	Body            string         `json:"body"`
+	CreatedAt       time.Time      `json:"createdAt"`
+	UpdatedAt       time.Time      `json:"updatedAt"`
+	ParentCommentID string         `json:"parentCommentId,omitempty"`
+	Depth           int            `json:"depth"`
+	ReactionsCount  int            `json:"reactionsCount"`
+	ViewerReaction  string         `json:"viewerReaction,omitempty"`
+	ReactionUsers   []ReactionUser `json:"reactionUsers"`
+	Author          PostAuthor     `json:"author"`
+	Replies         []Comment      `json:"replies"`
 }
 
 type Notification struct {
@@ -170,6 +171,7 @@ func (s Service) Comments(ctx context.Context, viewerID, postID string) ([]Comme
 		reactionSummary := reactionsByCommentID[comment.ID]
 		comment.ReactionsCount = reactionSummary.Count
 		comment.ViewerReaction = reactionSummary.ViewerReaction
+		comment.ReactionUsers = ensureReactionUsers(reactionSummary.Users)
 	}
 
 	topLevel := make([]*Comment, 0)
@@ -443,6 +445,7 @@ func (s Service) UpdateComment(ctx context.Context, author auth.User, postID, co
 		Depth:           existingComment.Depth(),
 		ReactionsCount:  reactionSummary.Count,
 		ViewerReaction:  reactionSummary.ViewerReaction,
+		ReactionUsers:   ensureReactionUsers(reactionSummary.Users),
 		Author: PostAuthor{
 			ID:                author.ID,
 			FirstName:         author.FirstName,

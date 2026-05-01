@@ -599,6 +599,12 @@ select {
   justify-content: flex-start;
 }
 
+.reaction-hover {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
 .reaction-button {
   display: inline-flex;
   align-items: center;
@@ -620,9 +626,9 @@ select {
 }
 
 .reaction-button--active {
-  border-color: color-mix(in srgb, var(--accent) 62%, var(--line));
-  background: var(--accent-soft);
-  color: var(--accent);
+  border-color: rgba(237, 73, 86, 0.62);
+  background: rgba(237, 73, 86, 0.12);
+  color: #ed4956;
 }
 
 .reaction-button:disabled {
@@ -630,8 +636,82 @@ select {
   cursor: wait;
 }
 
+.reaction-button:hover,
+.reaction-button:focus-visible {
+  border-color: rgba(237, 73, 86, 0.62);
+  color: #ed4956;
+}
+
 .reaction-button svg {
   flex: 0 0 auto;
+  color: #ed4956;
+}
+
+.reaction-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #ed4956;
+  cursor: pointer;
+}
+
+.reaction-icon-button:hover,
+.reaction-icon-button:focus-visible,
+.reaction-icon-button--active {
+  color: #ed4956;
+}
+
+.reaction-icon-button:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.reaction-popover {
+  position: absolute;
+  bottom: calc(100% + 0.55rem);
+  left: 0;
+  z-index: 40;
+  display: none;
+  min-width: 210px;
+  max-width: min(280px, 78vw);
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card-strong);
+  box-shadow: 0 18px 36px var(--panel-shadow);
+  color: var(--ink);
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+.reaction-popover--right {
+  right: 0;
+  left: auto;
+}
+
+.reaction-popover strong,
+.reaction-popover span {
+  display: block;
+}
+
+.reaction-popover strong {
+  margin-bottom: 0.4rem;
+  color: var(--muted);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.reaction-hover:hover .reaction-popover,
+.reaction-hover:focus-within .reaction-popover {
+  display: grid;
+  gap: 0.25rem;
 }
 
 .hero-panel,
@@ -1862,6 +1942,39 @@ label {
 
 .comment-card__header {
   align-items: flex-start;
+}
+
+.comment-card__content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.comment-card__meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  align-items: center;
+}
+
+.comment-card__likes,
+.comment-card__text-action {
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.comment-card__text-action {
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.comment-card__text-action:hover,
+.comment-card__text-action:focus-visible {
+  color: var(--ink);
 }
 
 .comment-card__header span,

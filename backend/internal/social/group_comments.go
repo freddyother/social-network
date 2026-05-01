@@ -13,14 +13,15 @@ import (
 const maxGroupCommentBodyLength = 1000
 
 type GroupComment struct {
-	ID             string    `json:"id"`
-	GroupID        string    `json:"groupId"`
-	GroupPostID    string    `json:"groupPostId"`
-	Body           string    `json:"body"`
-	CreatedAt      time.Time `json:"createdAt"`
-	ReactionsCount int       `json:"reactionsCount"`
-	ViewerReaction string    `json:"viewerReaction,omitempty"`
-	Author         GroupUser `json:"author"`
+	ID             string         `json:"id"`
+	GroupID        string         `json:"groupId"`
+	GroupPostID    string         `json:"groupPostId"`
+	Body           string         `json:"body"`
+	CreatedAt      time.Time      `json:"createdAt"`
+	ReactionsCount int            `json:"reactionsCount"`
+	ViewerReaction string         `json:"viewerReaction,omitempty"`
+	ReactionUsers  []ReactionUser `json:"reactionUsers"`
+	Author         GroupUser      `json:"author"`
 }
 
 type CreateGroupCommentInput struct {
@@ -201,6 +202,7 @@ func (s Service) loadGroupCommentsFromRows(ctx context.Context, rows *sql.Rows, 
 		reactionSummary := reactionsByCommentID[comments[index].ID]
 		comments[index].ReactionsCount = reactionSummary.Count
 		comments[index].ViewerReaction = reactionSummary.ViewerReaction
+		comments[index].ReactionUsers = ensureReactionUsers(reactionSummary.Users)
 	}
 
 	return comments, nil
