@@ -1561,7 +1561,8 @@ label {
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: linear-gradient(135deg, var(--accent-soft), var(--ghost-bg));
+  background: var(--avatar-bg, linear-gradient(135deg, var(--accent-soft), var(--ghost-bg)));
+  color: #ffffff;
   flex-shrink: 0;
 }
 
@@ -1584,9 +1585,11 @@ label {
 }
 
 .user-avatar__fallback {
-  color: var(--ink);
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  color: #ffffff;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.24);
 }
 
 .user-avatar--small .user-avatar__fallback {

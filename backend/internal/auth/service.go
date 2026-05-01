@@ -801,14 +801,14 @@ func (s Service) createOAuthUser(ctx context.Context, tx *sql.Tx, identity oauth
 				id,
 				email,
 				password_hash,
-				first_name,
-				last_name,
-				date_of_birth,
-				avatar_url,
-				nickname,
-				profile_visibility
-			)
-			VALUES ($1, $2, $3, $4, $5, NULL, NULLIF($6, ''), NULLIF($7, ''), 'public')
+			first_name,
+			last_name,
+			date_of_birth,
+			avatar_url,
+			nickname,
+			profile_visibility
+		)
+			VALUES ($1, $2, $3, $4, $5, NULL, NULL, NULLIF($6, ''), 'public')
 			RETURNING
 				id,
 				email,
@@ -829,7 +829,6 @@ func (s Service) createOAuthUser(ctx context.Context, tx *sql.Tx, identity oauth
 		string(passwordHash),
 		firstName,
 		lastName,
-		identity.AvatarURL,
 		nickname,
 	)
 

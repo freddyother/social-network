@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 
+import UserAvatar from "../components/ui/UserAvatar.vue"
 import {
   acceptFollowRequest,
   declineFollowRequest,
@@ -114,20 +115,6 @@ const profileName = computed(() => {
   }
 
   return displayName(user)
-})
-const profileInitials = computed(() => {
-  const user = viewedProfile.value || editableProfile.value || store.state.currentUser
-  if (!user) {
-    return "N"
-  }
-
-  const source = displayName(user) || user.email || "NEXO"
-  return source
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() || "")
-    .join("") || "N"
 })
 const followButtonLabel = computed(() => {
   if (isFollowingProfile.value) {
@@ -844,15 +831,12 @@ onBeforeUnmount(() => {
       <template v-else-if="viewedProfile">
         <div class="profile-hero__body">
           <div class="profile-hero__avatar-column">
-            <div class="user-avatar user-avatar--profile">
-              <img
-                v-if="viewedProfile.avatarUrl"
-                :src="viewedProfile.avatarUrl"
-                :alt="`${profileName} profile photo`"
-                class="user-avatar__image"
-              />
-              <span v-else class="user-avatar__fallback">{{ profileInitials }}</span>
-            </div>
+            <UserAvatar
+              :user="viewedProfile"
+              :name="profileName"
+              :alt="`${profileName} profile photo`"
+              size="profile"
+            />
 
             <input
               v-if="isOwnProfile && editableProfile"
@@ -1218,15 +1202,7 @@ onBeforeUnmount(() => {
         <aside class="post-modal__sidebar">
           <header class="post-modal__sidebar-header">
             <div class="post-modal__author">
-              <div class="user-avatar user-avatar--small">
-                <img
-                  v-if="viewedProfile?.avatarUrl"
-                  :src="viewedProfile.avatarUrl"
-                  :alt="`${profileName} profile photo`"
-                  class="user-avatar__image"
-                />
-                <span v-else class="user-avatar__fallback">{{ profileInitials }}</span>
-              </div>
+              <UserAvatar :user="viewedProfile" :name="profileName" :alt="`${profileName} profile photo`" />
 
               <div class="post-modal__author-copy">
                 <strong>{{ profileName }}</strong>

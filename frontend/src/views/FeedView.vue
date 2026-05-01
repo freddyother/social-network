@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { RouterLink, useRoute } from "vue-router"
 
 import EmojiPicker from "../components/ui/EmojiPicker.vue"
+import UserAvatar from "../components/ui/UserAvatar.vue"
 import {
   clearCommentReaction,
   clearPostReaction,
@@ -1750,15 +1751,11 @@ watch(
           <aside class="post-modal__sidebar">
             <header class="post-modal__sidebar-header">
               <div class="post-modal__author">
-                <div class="user-avatar user-avatar--small">
-                  <img
-                    v-if="selectedPost.author?.avatarUrl"
-                    :src="selectedPost.author.avatarUrl"
-                    :alt="`${displayName(selectedPost.author)} profile photo`"
-                    class="user-avatar__image"
-                  />
-                  <span v-else class="user-avatar__fallback">{{ displayName(selectedPost.author).slice(0, 1).toUpperCase() || "N" }}</span>
-                </div>
+                <UserAvatar
+                  :user="selectedPost.author"
+                  :name="displayName(selectedPost.author)"
+                  :alt="`${displayName(selectedPost.author)} profile photo`"
+                />
 
                 <div class="post-modal__author-copy">
                   <strong>{{ displayName(selectedPost.author) }}</strong>

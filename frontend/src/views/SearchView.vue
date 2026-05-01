@@ -2,6 +2,7 @@
 import { computed, reactive, ref, watch } from "vue"
 import { RouterLink, useRoute, useRouter } from "vue-router"
 
+import UserAvatar from "../components/ui/UserAvatar.vue"
 import { isApiError, searchAll } from "../services/api"
 import { useAppStore } from "../stores/app"
 import { formatRelativeTime } from "../utils/date"
@@ -46,16 +47,6 @@ function displayName(user) {
   }
 
   return user.nickname || `${user.firstName} ${user.lastName}`.trim() || "NEXO member"
-}
-
-function userInitials(user) {
-  const source = displayName(user)
-  return source
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() || "")
-    .join("") || "N"
 }
 
 function relationshipLabel(status) {
@@ -248,15 +239,7 @@ watch(
               <div v-if="results.users.length" class="user-stack">
                 <article v-for="user in results.users" :key="user.id" class="user-card">
                   <span class="chat-user-card__identity">
-                    <span class="user-avatar user-avatar--small">
-                      <img
-                        v-if="user.avatarUrl"
-                        :src="user.avatarUrl"
-                        :alt="`${displayName(user)} avatar`"
-                        class="user-avatar__image"
-                      />
-                      <span v-else class="user-avatar__fallback">{{ userInitials(user) }}</span>
-                    </span>
+                    <UserAvatar :user="user" :name="displayName(user)" :alt="`${displayName(user)} avatar`" />
                     <span>
                       <strong>{{ displayName(user) }}</strong>
                       <small>{{ user.aboutMe || "Profile ready to explore." }}</small>

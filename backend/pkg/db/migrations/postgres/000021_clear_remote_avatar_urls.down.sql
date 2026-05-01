@@ -1,0 +1,1 @@
+-- Remote avatar URLs cleared by the up migration cannot be restored automatically.

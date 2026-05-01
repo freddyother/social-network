@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRoute, useRouter } from "vue-router"
 
 import EmojiPicker from "../components/ui/EmojiPicker.vue"
+import UserAvatar from "../components/ui/UserAvatar.vue"
 import {
   acceptGroupJoinRequest,
   clearGroupCommentReaction,
@@ -214,16 +215,6 @@ function displayName(user) {
   }
 
   return user.nickname || `${user.firstName} ${user.lastName}`.trim() || "NEXO member"
-}
-
-function userInitials(user) {
-  const source = displayName(user)
-  return source
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() || "")
-    .join("") || "N"
 }
 
 function groupSummary(group) {
@@ -1511,15 +1502,7 @@ watch(
               <header class="post-card__header">
                 <div class="post-card__header-main">
                   <div class="groups-main-feed__author">
-                    <span class="user-avatar user-avatar--small">
-                      <img
-                        v-if="post.author?.avatarUrl"
-                        :src="post.author.avatarUrl"
-                        :alt="`${displayName(post.author)} avatar`"
-                        class="user-avatar__image"
-                      />
-                      <span v-else class="user-avatar__fallback">{{ userInitials(post.author) }}</span>
-                    </span>
+                    <UserAvatar :user="post.author" :name="displayName(post.author)" :alt="`${displayName(post.author)} avatar`" />
 
                     <div>
                       <p class="eyebrow">Group post</p>
@@ -1760,15 +1743,11 @@ watch(
 
               <template v-if="selectedGroup">
                 <div class="groups-detail__hero">
-                  <span class="user-avatar user-avatar--small">
-                    <img
-                      v-if="selectedGroup.creator?.avatarUrl"
-                      :src="selectedGroup.creator.avatarUrl"
-                      :alt="`${displayName(selectedGroup.creator)} avatar`"
-                      class="user-avatar__image"
-                    />
-                    <span v-else class="user-avatar__fallback">{{ userInitials(selectedGroup.creator) }}</span>
-                  </span>
+                  <UserAvatar
+                    :user="selectedGroup.creator"
+                    :name="displayName(selectedGroup.creator)"
+                    :alt="`${displayName(selectedGroup.creator)} avatar`"
+                  />
 
                   <div class="groups-detail__copy">
                     <h3>{{ selectedGroup.title }}</h3>
@@ -2078,15 +2057,7 @@ watch(
                     class="user-card"
                   >
                     <div class="group-invite-suggestions__identity">
-                      <span class="user-avatar user-avatar--small">
-                        <img
-                          v-if="user.avatarUrl"
-                          :src="user.avatarUrl"
-                          :alt="`${displayName(user)} avatar`"
-                          class="user-avatar__image"
-                        />
-                        <span v-else class="user-avatar__fallback">{{ userInitials(user) }}</span>
-                      </span>
+                      <UserAvatar :user="user" :name="displayName(user)" :alt="`${displayName(user)} avatar`" />
 
                       <div>
                         <strong>{{ displayName(user) }}</strong>
@@ -2128,15 +2099,11 @@ watch(
                   class="user-card group-join-request-card"
                 >
                   <div class="group-invite-suggestions__identity">
-                    <span class="user-avatar user-avatar--small">
-                      <img
-                        v-if="joinRequest.requester?.avatarUrl"
-                        :src="joinRequest.requester.avatarUrl"
-                        :alt="`${displayName(joinRequest.requester)} avatar`"
-                        class="user-avatar__image"
-                      />
-                      <span v-else class="user-avatar__fallback">{{ userInitials(joinRequest.requester) }}</span>
-                    </span>
+                    <UserAvatar
+                      :user="joinRequest.requester"
+                      :name="displayName(joinRequest.requester)"
+                      :alt="`${displayName(joinRequest.requester)} avatar`"
+                    />
 
                     <div>
                       <strong>{{ displayName(joinRequest.requester) }}</strong>

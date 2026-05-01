@@ -1291,6 +1291,10 @@ func (s Service) loadPostEditorState(ctx context.Context, reader sqlReader, post
 
 func (s Service) publicURL(storagePath string) string {
 	normalizedPath := strings.TrimLeft(filepath.ToSlash(storagePath), "/")
+	if strings.HasPrefix(strings.ToLower(normalizedPath), "http://") || strings.HasPrefix(strings.ToLower(normalizedPath), "https://") {
+		return normalizedPath
+	}
+
 	return s.publicBaseURL + "/uploads/" + normalizedPath
 }
 

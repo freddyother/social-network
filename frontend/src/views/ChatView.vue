@@ -17,6 +17,7 @@ import {
   sendPrivateMessage
 } from "../services/api"
 import EmojiPicker from "../components/ui/EmojiPicker.vue"
+import UserAvatar from "../components/ui/UserAvatar.vue"
 import { realtimeClient } from "../services/realtime"
 import { useAppStore } from "../stores/app"
 import { formatDate as formatAppDate, formatTime } from "../utils/date"
@@ -86,24 +87,6 @@ function displayName(user) {
   }
 
   return user.nickname || `${user.firstName} ${user.lastName}`.trim() || "Unknown account"
-}
-
-function initialsFromText(value, fallback = "N") {
-  return String(value || "")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() || "")
-    .join("") || fallback
-}
-
-function userInitials(user) {
-  return initialsFromText(displayName(user), "N")
-}
-
-function groupInitials(group) {
-  return initialsFromText(group?.title, "G")
 }
 
 function groupMemberCountLabel(group = activeGroup.value) {
@@ -1093,15 +1076,11 @@ onBeforeUnmount(() => {
                 :class="{ 'chat-thread--active': activeConversationUserId === conversation.user.id }"
                 @click="navigateToConversation(conversation.user.id)"
               >
-                <span class="user-avatar user-avatar--small">
-                  <img
-                    v-if="conversation.user.avatarUrl"
-                    :src="conversation.user.avatarUrl"
-                    :alt="`${displayName(conversation.user)} avatar`"
-                    class="user-avatar__image"
-                  />
-                  <span v-else class="user-avatar__fallback">{{ userInitials(conversation.user) }}</span>
-                </span>
+                <UserAvatar
+                  :user="conversation.user"
+                  :name="displayName(conversation.user)"
+                  :alt="`${displayName(conversation.user)} avatar`"
+                />
 
                 <span class="chat-thread__content">
                   <span class="chat-thread__head">
@@ -1141,9 +1120,7 @@ onBeforeUnmount(() => {
                 :class="{ 'chat-thread--active': activeGroupId === group.id }"
                 @click="navigateToGroupChat(group.id)"
               >
-                <span class="user-avatar user-avatar--small">
-                  <span class="user-avatar__fallback">{{ groupInitials(group) }}</span>
-                </span>
+                <UserAvatar :name="group.title" :alt="`${group.title} avatar`" />
 
                 <span class="chat-thread__content">
                   <span class="chat-thread__head">
@@ -1180,15 +1157,7 @@ onBeforeUnmount(() => {
                 @click="navigateToConversation(user.id)"
               >
                 <span class="chat-user-card__identity">
-                  <span class="user-avatar user-avatar--small">
-                    <img
-                      v-if="user.avatarUrl"
-                      :src="user.avatarUrl"
-                      :alt="`${displayName(user)} avatar`"
-                      class="user-avatar__image"
-                    />
-                    <span v-else class="user-avatar__fallback">{{ userInitials(user) }}</span>
-                  </span>
+                  <UserAvatar :user="user" :name="displayName(user)" :alt="`${displayName(user)} avatar`" />
                   <span>
                     <strong>{{ displayName(user) }}</strong>
                     <small>{{ user.aboutMe || "Open a private conversation." }}</small>
@@ -1204,9 +1173,7 @@ onBeforeUnmount(() => {
           <template v-if="hasSelectedThread">
             <header class="chat-panel__header">
               <div v-if="isGroupThread" class="chat-panel__identity">
-                <span class="user-avatar user-avatar--small">
-                  <span class="user-avatar__fallback">{{ groupInitials(activeGroup) }}</span>
-                </span>
+                <UserAvatar :name="activeGroup?.title || 'Group chat'" alt="Group chat avatar" />
 
                 <div>
                   <h3>{{ activeGroup?.title || "Group chat" }}</h3>
@@ -1227,15 +1194,7 @@ onBeforeUnmount(() => {
                           :key="member.id"
                           class="chat-members__item"
                         >
-                          <span class="user-avatar user-avatar--small">
-                            <img
-                              v-if="member.avatarUrl"
-                              :src="member.avatarUrl"
-                              :alt="`${displayName(member)} avatar`"
-                              class="user-avatar__image"
-                            />
-                            <span v-else class="user-avatar__fallback">{{ userInitials(member) }}</span>
-                          </span>
+                          <UserAvatar :user="member" :name="displayName(member)" :alt="`${displayName(member)} avatar`" />
 
                           <span class="chat-members__details">
                             <strong>{{ displayName(member) }}</strong>
@@ -1253,15 +1212,11 @@ onBeforeUnmount(() => {
               </div>
 
               <div v-else class="chat-panel__identity">
-                <span class="user-avatar user-avatar--small">
-                  <img
-                    v-if="conversationUser?.avatarUrl"
-                    :src="conversationUser.avatarUrl"
-                    :alt="`${displayName(conversationUser)} avatar`"
-                    class="user-avatar__image"
-                  />
-                  <span v-else class="user-avatar__fallback">{{ userInitials(conversationUser) }}</span>
-                </span>
+                <UserAvatar
+                  :user="conversationUser"
+                  :name="displayName(conversationUser)"
+                  :alt="`${displayName(conversationUser)} avatar`"
+                />
 
                 <div>
                   <h3>{{ displayName(conversationUser) }}</h3>
