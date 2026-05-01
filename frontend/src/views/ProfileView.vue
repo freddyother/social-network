@@ -21,7 +21,7 @@ import {
 import { realtimeClient } from "../services/realtime"
 import { useAppStore } from "../stores/app"
 import { THEME_OPTIONS } from "../theme"
-import { formatDate, formatRelativeTime } from "../utils/date"
+import { formatRelativeTime } from "../utils/date"
 
 const props = defineProps({
   handle: {
@@ -64,6 +64,7 @@ const privacyForm = reactive({
 const profileForm = reactive({
   firstName: "",
   lastName: "",
+  dateOfBirth: "",
   aboutMe: ""
 })
 
@@ -105,6 +106,7 @@ const hasProfileChanges = computed(() => {
   return (
     profileForm.firstName !== (editableProfile.value.firstName || "") ||
     profileForm.lastName !== (editableProfile.value.lastName || "") ||
+    profileForm.dateOfBirth !== (editableProfile.value.dateOfBirth || "") ||
     profileForm.aboutMe !== (editableProfile.value.aboutMe || "")
   )
 })
@@ -403,6 +405,7 @@ function loadPrivacyValue() {
 function loadProfileForm() {
   profileForm.firstName = editableProfile.value?.firstName || ""
   profileForm.lastName = editableProfile.value?.lastName || ""
+  profileForm.dateOfBirth = editableProfile.value?.dateOfBirth || ""
   profileForm.aboutMe = editableProfile.value?.aboutMe || ""
 }
 
@@ -477,6 +480,7 @@ async function saveProfile() {
     const updatedUser = await updateProfile({
       firstName: profileForm.firstName,
       lastName: profileForm.lastName,
+      dateOfBirth: profileForm.dateOfBirth,
       aboutMe: profileForm.aboutMe
     })
 
@@ -487,6 +491,7 @@ async function saveProfile() {
       profileDetailsError.value =
         error.payload?.fields?.firstName ||
         error.payload?.fields?.lastName ||
+        error.payload?.fields?.dateOfBirth ||
         error.payload?.fields?.aboutMe ||
         error.message
     } else {
@@ -941,6 +946,10 @@ onBeforeUnmount(() => {
                   <input v-model.trim="profileForm.lastName" type="text" placeholder="Last name" />
                 </label>
                 <label class="form-grid__full">
+                  <span>Date of birth</span>
+                  <input v-model="profileForm.dateOfBirth" type="date" />
+                </label>
+                <label class="form-grid__full">
                   <span>About me</span>
                   <textarea
                     v-model="profileForm.aboutMe"
@@ -951,7 +960,7 @@ onBeforeUnmount(() => {
                 </label>
               </div>
               <div class="profile-form__actions">
-                <p class="feed-note">Email, nickname, and date of birth stay locked for now.</p>
+                <p class="feed-note">Email and nickname stay locked for now.</p>
                 <button
                   type="button"
                   class="button"
@@ -975,7 +984,6 @@ onBeforeUnmount(() => {
         <article class="panel">
           <template v-if="isOwnProfile && editableProfile">
             <h3>Locked fields</h3>
-            <p>Date of birth: {{ formatDate(editableProfile.dateOfBirth) }}</p>
             <p>Nickname: {{ editableProfile.nickname || "Not set yet" }}</p>
             <p>Email: {{ editableProfile.email }}</p>
           </template>

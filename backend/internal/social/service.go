@@ -112,9 +112,10 @@ type FollowActionResult struct {
 }
 
 type UpdateProfileInput struct {
-	FirstName string
-	LastName  string
-	AboutMe   string
+	FirstName   string
+	LastName    string
+	DateOfBirth string
+	AboutMe     string
 }
 
 type Service struct {
@@ -954,8 +955,12 @@ func (s Service) UpdateProfile(ctx context.Context, userID string, input UpdateP
 		ctx,
 		`
 			UPDATE users
-			SET first_name = $1, last_name = $2, about_me = NULLIF($3, ''), updated_at = NOW()
-			WHERE id = $4
+			SET first_name = $1,
+				last_name = $2,
+				date_of_birth = $3,
+				about_me = NULLIF($4, ''),
+				updated_at = NOW()
+			WHERE id = $5
 			RETURNING
 				id,
 				email,
@@ -972,6 +977,7 @@ func (s Service) UpdateProfile(ctx context.Context, userID string, input UpdateP
 		`,
 		normalizedInput.FirstName,
 		normalizedInput.LastName,
+		nullableDateParam(normalizedInput.DateOfBirth),
 		normalizedInput.AboutMe,
 		userID,
 	)
@@ -1401,9 +1407,10 @@ func normalizeThemePreference(themePreference string) (string, error) {
 
 func normalizeUpdateProfileInput(input UpdateProfileInput) (UpdateProfileInput, error) {
 	normalized := UpdateProfileInput{
-		FirstName: strings.TrimSpace(input.FirstName),
-		LastName:  strings.TrimSpace(input.LastName),
-		AboutMe:   strings.TrimSpace(input.AboutMe),
+		FirstName:   strings.TrimSpace(input.FirstName),
+		LastName:    strings.TrimSpace(input.LastName),
+		DateOfBirth: strings.TrimSpace(input.DateOfBirth),
+		AboutMe:     strings.TrimSpace(input.AboutMe),
 	}
 
 	fieldErrors := make(map[string]string)
@@ -1413,6 +1420,17 @@ func normalizeUpdateProfileInput(input UpdateProfileInput) (UpdateProfileInput, 
 
 	if normalized.LastName == "" {
 		fieldErrors["lastName"] = "Last name is required."
+	}
+
+	if normalized.DateOfBirth != "" {
+		birthDate, err := parseProfileDateOfBirth(normalized.DateOfBirth)
+		if err != nil {
+			fieldErrors["dateOfBirth"] = "Date of birth must use YYYY-MM-DD or DD/MM/YYYY."
+		} else if !birthDate.Before(time.Now().UTC()) {
+			fieldErrors["dateOfBirth"] = "Date of birth must be in the past."
+		} else {
+			normalized.DateOfBirth = birthDate.Format("2006-01-02")
+		}
 	}
 
 	if len(normalized.AboutMe) > 500 {
@@ -1427,6 +1445,30 @@ func normalizeUpdateProfileInput(input UpdateProfileInput) (UpdateProfileInput, 
 	}
 
 	return normalized, nil
+}
+
+func parseProfileDateOfBirth(value string) (time.Time, error) {
+	normalized := strings.TrimSpace(value)
+	if normalized == "" {
+		return time.Time{}, fmt.Errorf("date of birth is empty")
+	}
+
+	for _, layout := range []string{"2006-01-02", "2/1/2006"} {
+		birthDate, err := time.Parse(layout, normalized)
+		if err == nil {
+			return birthDate.UTC(), nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("date of birth must use YYYY-MM-DD or DD/MM/YYYY")
+}
+
+func nullableDateParam(value string) any {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+
+	return value
 }
 
 func wrapImageUploadError(err error, field string) error {

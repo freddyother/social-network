@@ -551,9 +551,10 @@ func (h SocialHandler) HandleUpdateProfile(w stdlibhttp.ResponseWriter, r *stdli
 	}
 
 	var payload struct {
-		FirstName string `json:"firstName"`
-		LastName  string `json:"lastName"`
-		AboutMe   string `json:"aboutMe"`
+		FirstName   string `json:"firstName"`
+		LastName    string `json:"lastName"`
+		DateOfBirth string `json:"dateOfBirth"`
+		AboutMe     string `json:"aboutMe"`
 	}
 	if err := decodeJSON(r, &payload); err != nil {
 		writeError(w, stdlibhttp.StatusBadRequest, err.Error(), nil)
@@ -561,9 +562,10 @@ func (h SocialHandler) HandleUpdateProfile(w stdlibhttp.ResponseWriter, r *stdli
 	}
 
 	user, err := h.service.UpdateProfile(r.Context(), currentUser.ID, social.UpdateProfileInput{
-		FirstName: payload.FirstName,
-		LastName:  payload.LastName,
-		AboutMe:   payload.AboutMe,
+		FirstName:   payload.FirstName,
+		LastName:    payload.LastName,
+		DateOfBirth: payload.DateOfBirth,
+		AboutMe:     payload.AboutMe,
 	})
 	if err != nil {
 		h.handleSocialError(w, err)
