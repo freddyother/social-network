@@ -18,6 +18,7 @@ import (
 type authService interface {
 	Register(ctx context.Context, input auth.RegisterInput) (auth.AuthResult, error)
 	Login(ctx context.Context, input auth.LoginInput) (auth.AuthResult, error)
+	OAuthLogin(ctx context.Context, input auth.OAuthLoginInput) (auth.AuthResult, error)
 	CheckNicknameAvailability(ctx context.Context, nickname string) (auth.NicknameAvailability, error)
 	RequestPasswordReset(ctx context.Context, input auth.PasswordResetRequestInput) (auth.PasswordResetRequestResult, error)
 	ResetPassword(ctx context.Context, input auth.ResetPasswordInput) error
@@ -63,6 +64,25 @@ func (h AuthHandler) HandleLogin(w stdlibhttp.ResponseWriter, r *stdlibhttp.Requ
 	}
 
 	result, err := h.service.Login(r.Context(), input)
+	if err != nil {
+		h.handleServiceError(w, err)
+		return
+	}
+
+	h.setSessionCookie(w, result.Session)
+	response.JSON(w, stdlibhttp.StatusOK, map[string]any{
+		"user": result.User,
+	})
+}
+
+func (h AuthHandler) HandleOAuthLogin(w stdlibhttp.ResponseWriter, r *stdlibhttp.Request) {
+	var input auth.OAuthLoginInput
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, stdlibhttp.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	result, err := h.service.OAuthLogin(r.Context(), input)
 	if err != nil {
 		h.handleServiceError(w, err)
 		return
@@ -167,6 +187,10 @@ func (h AuthHandler) handleServiceError(w stdlibhttp.ResponseWriter, err error) 
 		})
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		writeError(w, stdlibhttp.StatusUnauthorized, "Invalid nickname, email, or password.", nil)
+	case errors.Is(err, auth.ErrOAuthNotConfigured):
+		writeError(w, stdlibhttp.StatusServiceUnavailable, "Social sign-in is not configured yet.", nil)
+	case errors.Is(err, auth.ErrInvalidOAuthToken):
+		writeError(w, stdlibhttp.StatusUnauthorized, "Social sign-in could not be verified.", nil)
 	case errors.Is(err, auth.ErrUnauthorized):
 		writeError(w, stdlibhttp.StatusUnauthorized, "Authentication required.", nil)
 	default:

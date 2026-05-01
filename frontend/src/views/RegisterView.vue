@@ -2,10 +2,13 @@
 import { onBeforeUnmount, reactive, ref, watch } from "vue"
 import { useRouter } from "vue-router"
 
+import SocialAuthButtons from "../components/ui/SocialAuthButtons.vue"
 import { checkNicknameAvailability, isApiError, registerUser } from "../services/api"
+import { useAppStore } from "../stores/app"
 import { toISODateInput } from "../utils/date"
 
 const router = useRouter()
+const store = useAppStore()
 
 const form = reactive({
   firstName: "",
@@ -202,6 +205,11 @@ async function handleSubmit() {
     isSubmitting.value = false
   }
 }
+
+async function handleSocialAuthenticated(user) {
+  store.setCurrentUser(user)
+  await router.push("/feed")
+}
 </script>
 
 <template>
@@ -313,6 +321,7 @@ async function handleSubmit() {
           {{ isSubmitting ? "Creating account..." : "Create account" }}
         </button>
       </form>
+      <SocialAuthButtons mode="register" @authenticated="handleSocialAuthenticated" />
     </div>
   </section>
 </template>

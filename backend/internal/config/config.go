@@ -19,6 +19,7 @@ type Config struct {
 	CORS            CORSConfig
 	Session         SessionConfig
 	PasswordReset   PasswordResetConfig
+	OAuth           OAuthConfig
 	Mail            MailConfig
 }
 
@@ -39,6 +40,11 @@ type PasswordResetConfig struct {
 	TokenTTL             time.Duration
 	URL                  string
 	RevealLinkInResponse bool
+}
+
+type OAuthConfig struct {
+	GoogleClientID string
+	AppleClientID  string
 }
 
 type MailConfig struct {
@@ -91,6 +97,10 @@ func Load() Config {
 			TokenTTL:             getEnvDurationMinutes("PASSWORD_RESET_TOKEN_TTL_MINUTES", 30),
 			URL:                  strings.TrimRight(getEnv("PASSWORD_RESET_URL", frontendBaseURL+"/reset-password"), "/"),
 			RevealLinkInResponse: getEnvBool("PASSWORD_RESET_REVEAL_LINK", appEnv != "production"),
+		},
+		OAuth: OAuthConfig{
+			GoogleClientID: getEnv("GOOGLE_CLIENT_ID", ""),
+			AppleClientID:  getEnv("APPLE_CLIENT_ID", ""),
 		},
 		Mail: MailConfig{
 			SMTPHost:  getEnvAny([]string{"SMTP_HOST", "SPRING_MAIL_HOST"}, ""),

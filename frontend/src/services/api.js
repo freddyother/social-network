@@ -201,6 +201,15 @@ export async function loginUser(credentials) {
   return normalizeUser(payload?.user || null)
 }
 
+export async function oauthLogin(details) {
+  const payload = await request("/auth/oauth", {
+    method: "POST",
+    body: JSON.stringify(details)
+  })
+
+  return normalizeUser(payload?.user || null)
+}
+
 export async function registerUser(details) {
   const payload = await request("/auth/register", {
     method: "POST",

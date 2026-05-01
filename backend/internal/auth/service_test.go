@@ -180,6 +180,53 @@ func TestNormalizeLoginInputFallsBackToEmailField(t *testing.T) {
 	}
 }
 
+func TestNormalizeOAuthClientIDRejectsPlaceholdersAndInvalidGoogleIDs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		value    string
+		provider string
+		want     string
+	}{
+		{
+			name:     "placeholder",
+			value:    "...",
+			provider: oauthProviderGoogle,
+			want:     "",
+		},
+		{
+			name:     "google client id must be a web client id",
+			value:    "not-a-google-web-client-id",
+			provider: oauthProviderGoogle,
+			want:     "",
+		},
+		{
+			name:     "google web client id",
+			value:    " 1234567890-abc.apps.googleusercontent.com ",
+			provider: oauthProviderGoogle,
+			want:     "1234567890-abc.apps.googleusercontent.com",
+		},
+		{
+			name:     "apple service id",
+			value:    " com.example.web ",
+			provider: oauthProviderApple,
+			want:     "com.example.web",
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := normalizeOAuthClientID(test.value, test.provider); got != test.want {
+				t.Fatalf("expected %q, got %q", test.want, got)
+			}
+		})
+	}
+}
+
 func TestNormalizePasswordResetRequestInputRequiresEmail(t *testing.T) {
 	t.Parallel()
 

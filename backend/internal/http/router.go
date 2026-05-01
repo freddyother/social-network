@@ -31,7 +31,10 @@ func NewRouter(cfg config.Config, db *sql.DB) stdlibhttp.Handler {
 		TokenTTL:             cfg.PasswordReset.TokenTTL,
 		ResetURL:             cfg.PasswordReset.URL,
 		RevealLinkInResponse: cfg.PasswordReset.RevealLinkInResponse,
-	}, resetMailer)
+	}, resetMailer).WithOAuthConfig(auth.OAuthConfig{
+		GoogleClientID: cfg.OAuth.GoogleClientID,
+		AppleClientID:  cfg.OAuth.AppleClientID,
+	})
 	realtimeHub := realtime.NewHub()
 	socialService := social.NewService(db, cfg.UploadsDir, cfg.PublicBaseURL, realtimeHub)
 	realtimeHub.SetPostSubscriptionAuthorizer(socialService.CanViewPost)
@@ -59,6 +62,7 @@ func NewRouter(cfg config.Config, db *sql.DB) stdlibhttp.Handler {
 	mux.HandleFunc("GET /api/v1/meta", metaHandler.Handle)
 	mux.HandleFunc("POST /api/v1/auth/register", authHandler.HandleRegister)
 	mux.HandleFunc("POST /api/v1/auth/login", authHandler.HandleLogin)
+	mux.HandleFunc("POST /api/v1/auth/oauth", authHandler.HandleOAuthLogin)
 	mux.HandleFunc("GET /api/v1/auth/nickname-availability", authHandler.HandleNicknameAvailability)
 	mux.HandleFunc("POST /api/v1/auth/forgot-password", authHandler.HandleForgotPassword)
 	mux.HandleFunc("POST /api/v1/auth/reset-password", authHandler.HandleResetPassword)

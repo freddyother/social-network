@@ -2,6 +2,7 @@
 import { reactive, ref } from "vue"
 import { useRouter } from "vue-router"
 
+import SocialAuthButtons from "../components/ui/SocialAuthButtons.vue"
 import { isApiError, loginUser } from "../services/api"
 import { useAppStore } from "../stores/app"
 
@@ -52,6 +53,11 @@ async function handleSubmit() {
     isSubmitting.value = false
   }
 }
+
+async function handleSocialAuthenticated(user) {
+  store.setCurrentUser(user)
+  await router.push("/feed")
+}
 </script>
 
 <template>
@@ -91,6 +97,7 @@ async function handleSubmit() {
           {{ isSubmitting ? "Signing in..." : "Sign in" }}
         </button>
       </form>
+      <SocialAuthButtons mode="login" @authenticated="handleSocialAuthenticated" />
     </div>
   </section>
 </template>

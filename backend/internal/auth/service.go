@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
@@ -24,6 +25,8 @@ var (
 	ErrInvalidCredentials   = errors.New("invalid email or password")
 	ErrUnauthorized         = errors.New("authentication required")
 	ErrInvalidResetToken    = errors.New("invalid or expired password reset token")
+	ErrOAuthNotConfigured   = errors.New("oauth provider is not configured")
+	ErrInvalidOAuthToken    = errors.New("invalid oauth token")
 )
 
 type ValidationError struct {
@@ -70,6 +73,11 @@ type PasswordResetConfig struct {
 	RevealLinkInResponse bool
 }
 
+type OAuthConfig struct {
+	GoogleClientID string
+	AppleClientID  string
+}
+
 type NicknameAvailability struct {
 	Nickname  string `json:"nickname"`
 	Available bool   `json:"available"`
@@ -104,11 +112,19 @@ type LoginInput struct {
 	Password   string `json:"password"`
 }
 
+type OAuthLoginInput struct {
+	Provider  string `json:"provider"`
+	IDToken   string `json:"idToken"`
+	FirstName string `json:"firstName,omitempty"`
+	LastName  string `json:"lastName,omitempty"`
+}
+
 type Service struct {
 	db            *sql.DB
 	sessionTTL    time.Duration
 	passwordReset PasswordResetConfig
 	resetMailer   PasswordResetMailer
+	oauth         OAuthConfig
 }
 
 func NewService(db *sql.DB, sessionTTL time.Duration, passwordReset PasswordResetConfig, resetMailer PasswordResetMailer) Service {
@@ -126,6 +142,28 @@ func NewService(db *sql.DB, sessionTTL time.Duration, passwordReset PasswordRese
 		passwordReset: passwordReset,
 		resetMailer:   resetMailer,
 	}
+}
+
+func (s Service) WithOAuthConfig(oauth OAuthConfig) Service {
+	s.oauth = OAuthConfig{
+		GoogleClientID: normalizeOAuthClientID(oauth.GoogleClientID, oauthProviderGoogle),
+		AppleClientID:  normalizeOAuthClientID(oauth.AppleClientID, oauthProviderApple),
+	}
+	return s
+}
+
+func normalizeOAuthClientID(value string, provider string) string {
+	normalized := strings.TrimSpace(value)
+	switch strings.ToLower(normalized) {
+	case "", "...", "changeme", "change-me", "replace-me", "todo", "your-client-id", "your-google-client-id", "your-apple-client-id":
+		return ""
+	}
+
+	if provider == oauthProviderGoogle && !strings.HasSuffix(strings.ToLower(normalized), ".apps.googleusercontent.com") {
+		return ""
+	}
+
+	return normalized
 }
 
 func (s Service) RequestPasswordReset(ctx context.Context, input PasswordResetRequestInput) (PasswordResetRequestResult, error) {
@@ -453,6 +491,69 @@ func (s Service) Login(ctx context.Context, input LoginInput) (AuthResult, error
 	}, nil
 }
 
+func (s Service) OAuthLogin(ctx context.Context, input OAuthLoginInput) (AuthResult, error) {
+	normalizedInput, err := normalizeOAuthLoginInput(input)
+	if err != nil {
+		return AuthResult{}, err
+	}
+
+	identity, err := s.verifyOAuthIdentity(ctx, normalizedInput)
+	if err != nil {
+		return AuthResult{}, err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return AuthResult{}, fmt.Errorf("begin oauth login transaction: %w", err)
+	}
+
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	record, err := s.findUserByOAuthIdentity(ctx, tx, identity.Provider, identity.Subject)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return AuthResult{}, err
+	}
+
+	if errors.Is(err, sql.ErrNoRows) {
+		record, err = s.findUserByEmailTx(ctx, tx, identity.Email)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return AuthResult{}, err
+		}
+
+		if errors.Is(err, sql.ErrNoRows) {
+			record, err = s.createOAuthUser(ctx, tx, identity)
+			if err != nil {
+				return AuthResult{}, err
+			}
+		} else if !identity.EmailAuthoritative {
+			err = ErrEmailAlreadyInUse
+			return AuthResult{}, err
+		}
+
+		if err = s.linkOAuthIdentity(ctx, tx, record.ID, identity); err != nil {
+			return AuthResult{}, err
+		}
+	}
+
+	session, err := s.createSession(ctx, tx, record.ID)
+	if err != nil {
+		return AuthResult{}, err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return AuthResult{}, fmt.Errorf("commit oauth login transaction: %w", err)
+	}
+
+	return AuthResult{
+		User:    record.PublicUser(),
+		Session: session,
+	}, nil
+}
+
 func (s Service) Logout(ctx context.Context, sessionID string) error {
 	if strings.TrimSpace(sessionID) == "" {
 		return nil
@@ -592,6 +693,281 @@ func (s Service) findUserByLoginIdentifier(ctx context.Context, identifier strin
 	}
 
 	return record, nil
+}
+
+func (s Service) findUserByEmailTx(ctx context.Context, tx *sql.Tx, email string) (userRecord, error) {
+	row := tx.QueryRowContext(
+		ctx,
+		`
+			SELECT
+				id,
+				email,
+				password_hash,
+				first_name,
+				last_name,
+				date_of_birth,
+				avatar_url,
+				nickname,
+				about_me,
+				profile_visibility,
+				theme_preference,
+				created_at,
+				updated_at
+			FROM users
+			WHERE email = $1
+			FOR UPDATE
+		`,
+		strings.ToLower(strings.TrimSpace(email)),
+	)
+
+	record, err := scanUserRecord(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return userRecord{}, sql.ErrNoRows
+		}
+
+		return userRecord{}, fmt.Errorf("find user by email in oauth transaction: %w", err)
+	}
+
+	return record, nil
+}
+
+func (s Service) findUserByOAuthIdentity(ctx context.Context, tx *sql.Tx, provider, subject string) (userRecord, error) {
+	row := tx.QueryRowContext(
+		ctx,
+		`
+			SELECT
+				u.id,
+				u.email,
+				u.password_hash,
+				u.first_name,
+				u.last_name,
+				u.date_of_birth,
+				u.avatar_url,
+				u.nickname,
+				u.about_me,
+				u.profile_visibility,
+				u.theme_preference,
+				u.created_at,
+				u.updated_at
+			FROM oauth_identities oi
+			INNER JOIN users u ON u.id = oi.user_id
+			WHERE oi.provider = $1 AND oi.provider_subject = $2
+			FOR UPDATE OF oi, u
+		`,
+		provider,
+		subject,
+	)
+
+	record, err := scanUserRecord(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return userRecord{}, sql.ErrNoRows
+		}
+
+		return userRecord{}, fmt.Errorf("find user by oauth identity: %w", err)
+	}
+
+	return record, nil
+}
+
+func (s Service) createOAuthUser(ctx context.Context, tx *sql.Tx, identity oauthIdentity) (userRecord, error) {
+	userID, err := newToken(16)
+	if err != nil {
+		return userRecord{}, fmt.Errorf("generate oauth user id: %w", err)
+	}
+
+	passwordToken, err := newToken(32)
+	if err != nil {
+		return userRecord{}, fmt.Errorf("generate oauth password token: %w", err)
+	}
+
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(passwordToken), bcrypt.DefaultCost)
+	if err != nil {
+		return userRecord{}, fmt.Errorf("hash oauth password token: %w", err)
+	}
+
+	nickname, err := s.generateOAuthNickname(ctx, tx, identity)
+	if err != nil {
+		return userRecord{}, err
+	}
+
+	firstName, lastName := identity.displayNames()
+
+	row := tx.QueryRowContext(
+		ctx,
+		`
+			INSERT INTO users (
+				id,
+				email,
+				password_hash,
+				first_name,
+				last_name,
+				date_of_birth,
+				avatar_url,
+				nickname,
+				profile_visibility
+			)
+			VALUES ($1, $2, $3, $4, $5, NULL, NULLIF($6, ''), NULLIF($7, ''), 'public')
+			RETURNING
+				id,
+				email,
+				password_hash,
+				first_name,
+				last_name,
+				date_of_birth,
+				avatar_url,
+				nickname,
+				about_me,
+				profile_visibility,
+				theme_preference,
+				created_at,
+				updated_at
+		`,
+		userID,
+		identity.Email,
+		string(passwordHash),
+		firstName,
+		lastName,
+		identity.AvatarURL,
+		nickname,
+	)
+
+	record, err := scanUserRecord(row)
+	if err != nil {
+		switch uniqueViolationConstraint(err) {
+		case "users_email_key":
+			return userRecord{}, ErrEmailAlreadyInUse
+		case "idx_users_nickname_unique":
+			return userRecord{}, ErrNicknameAlreadyInUse
+		}
+
+		return userRecord{}, fmt.Errorf("insert oauth user: %w", err)
+	}
+
+	return record, nil
+}
+
+func (s Service) linkOAuthIdentity(ctx context.Context, tx *sql.Tx, userID string, identity oauthIdentity) error {
+	identityID, err := newToken(16)
+	if err != nil {
+		return fmt.Errorf("generate oauth identity id: %w", err)
+	}
+
+	if _, err := tx.ExecContext(
+		ctx,
+		`
+			INSERT INTO oauth_identities (
+				id,
+				user_id,
+				provider,
+				provider_subject,
+				email
+			)
+			VALUES ($1, $2, $3, $4, $5)
+			ON CONFLICT (provider, provider_subject)
+			DO UPDATE SET
+				user_id = EXCLUDED.user_id,
+				email = EXCLUDED.email,
+				updated_at = NOW()
+		`,
+		identityID,
+		userID,
+		identity.Provider,
+		identity.Subject,
+		identity.Email,
+	); err != nil {
+		return fmt.Errorf("link oauth identity: %w", err)
+	}
+
+	return nil
+}
+
+func (s Service) generateOAuthNickname(ctx context.Context, tx *sql.Tx, identity oauthIdentity) (string, error) {
+	base := oauthNicknameBase(identity)
+	for index := 0; index < 100; index++ {
+		candidate := base
+		if index > 0 {
+			candidate = fmt.Sprintf("%s%d", base, index+1)
+		}
+
+		if runes := []rune(candidate); len(runes) > 80 {
+			candidate = string(runes[:80])
+		}
+
+		exists, err := nicknameExistsTx(ctx, tx, candidate)
+		if err != nil {
+			return "", err
+		}
+
+		if !exists {
+			return candidate, nil
+		}
+	}
+
+	suffix, err := newToken(4)
+	if err != nil {
+		return "", fmt.Errorf("generate oauth nickname suffix: %w", err)
+	}
+
+	candidate := fmt.Sprintf("%s-%s", base, suffix)
+	if runes := []rune(candidate); len(runes) > 80 {
+		candidate = string(runes[:80])
+	}
+
+	return candidate, nil
+}
+
+func oauthNicknameBase(identity oauthIdentity) string {
+	candidates := []string{
+		strings.Split(identity.Email, "@")[0],
+		strings.TrimSpace(strings.Join([]string{identity.FirstName, identity.LastName}, "")),
+		identity.Provider,
+		"nexo",
+	}
+
+	for _, candidate := range candidates {
+		cleaned := sanitizeNicknameBase(candidate)
+		if cleaned != "" {
+			return cleaned
+		}
+	}
+
+	return "nexo"
+}
+
+func sanitizeNicknameBase(value string) string {
+	var builder strings.Builder
+	for _, char := range strings.ToLower(strings.TrimSpace(value)) {
+		if unicode.IsLetter(char) || unicode.IsDigit(char) || char == '-' || char == '_' || char == '.' {
+			builder.WriteRune(char)
+		}
+	}
+
+	normalized := strings.Trim(builder.String(), "-_.")
+	if normalized == "" {
+		return ""
+	}
+
+	runes := []rune(normalized)
+	if len(runes) > 48 {
+		normalized = string(runes[:48])
+	}
+
+	return normalized
+}
+
+func nicknameExistsTx(ctx context.Context, tx *sql.Tx, nickname string) (bool, error) {
+	var exists bool
+	if err := tx.QueryRowContext(
+		ctx,
+		`SELECT EXISTS(SELECT 1 FROM users WHERE LOWER(BTRIM(nickname)) = $1)`,
+		strings.ToLower(strings.TrimSpace(nickname)),
+	).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check oauth nickname existence: %w", err)
+	}
+
+	return exists, nil
 }
 
 func (s Service) createSession(ctx context.Context, tx *sql.Tx, userID string) (Session, error) {
@@ -812,7 +1188,7 @@ type userRecord struct {
 	PasswordHash      string
 	FirstName         string
 	LastName          string
-	DateOfBirth       time.Time
+	DateOfBirth       sql.NullTime
 	AvatarURL         sql.NullString
 	Nickname          sql.NullString
 	AboutMe           sql.NullString
@@ -828,7 +1204,7 @@ func (r userRecord) PublicUser() User {
 		Email:             r.Email,
 		FirstName:         r.FirstName,
 		LastName:          r.LastName,
-		DateOfBirth:       r.DateOfBirth.Format("2006-01-02"),
+		DateOfBirth:       nullableDateValue(r.DateOfBirth),
 		AvatarURL:         nullableStringValue(r.AvatarURL),
 		Nickname:          nullableStringValue(r.Nickname),
 		AboutMe:           nullableStringValue(r.AboutMe),
@@ -869,6 +1245,14 @@ func nullableStringValue(value sql.NullString) string {
 	}
 
 	return value.String
+}
+
+func nullableDateValue(value sql.NullTime) string {
+	if !value.Valid {
+		return ""
+	}
+
+	return value.Time.Format("2006-01-02")
 }
 
 func newToken(size int) (string, error) {

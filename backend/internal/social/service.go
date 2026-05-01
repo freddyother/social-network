@@ -1485,7 +1485,7 @@ type authUserScanner interface {
 
 func scanAuthUser(row authUserScanner) (auth.User, error) {
 	var user auth.User
-	var dateOfBirth time.Time
+	var dateOfBirth sql.NullTime
 	var avatarURL sql.NullString
 	var nickname sql.NullString
 	var aboutMe sql.NullString
@@ -1507,7 +1507,9 @@ func scanAuthUser(row authUserScanner) (auth.User, error) {
 		return auth.User{}, err
 	}
 
-	user.DateOfBirth = dateOfBirth.Format("2006-01-02")
+	if dateOfBirth.Valid {
+		user.DateOfBirth = dateOfBirth.Time.Format("2006-01-02")
+	}
 	user.AvatarURL = nullStringValue(avatarURL)
 	user.Nickname = nullStringValue(nickname)
 	user.AboutMe = nullStringValue(aboutMe)

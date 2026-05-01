@@ -372,6 +372,7 @@ func TestHandleLogoutClearsSessionCookie(t *testing.T) {
 type stubAuthService struct {
 	registerFunc             func(ctx context.Context, input auth.RegisterInput) (auth.AuthResult, error)
 	loginFunc                func(ctx context.Context, input auth.LoginInput) (auth.AuthResult, error)
+	oauthLoginFunc           func(ctx context.Context, input auth.OAuthLoginInput) (auth.AuthResult, error)
 	nicknameAvailabilityFunc func(ctx context.Context, nickname string) (auth.NicknameAvailability, error)
 	passwordResetRequestFunc func(ctx context.Context, input auth.PasswordResetRequestInput) (auth.PasswordResetRequestResult, error)
 	resetPasswordFunc        func(ctx context.Context, input auth.ResetPasswordInput) error
@@ -393,6 +394,14 @@ func (s stubAuthService) Login(ctx context.Context, input auth.LoginInput) (auth
 	}
 
 	return s.loginFunc(ctx, input)
+}
+
+func (s stubAuthService) OAuthLogin(ctx context.Context, input auth.OAuthLoginInput) (auth.AuthResult, error) {
+	if s.oauthLoginFunc == nil {
+		return auth.AuthResult{}, nil
+	}
+
+	return s.oauthLoginFunc(ctx, input)
 }
 
 func (s stubAuthService) CheckNicknameAvailability(ctx context.Context, nickname string) (auth.NicknameAvailability, error) {
