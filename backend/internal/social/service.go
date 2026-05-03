@@ -26,6 +26,7 @@ const (
 	maxPostImageDimension = 1600
 	maxAvatarDimension    = 768
 	jpegQuality           = 86
+	discoverRefreshWindow = 2 * time.Minute
 )
 
 var (
@@ -489,6 +490,10 @@ func (s Service) CanViewPost(ctx context.Context, viewerID, postID string) bool 
 }
 
 func (s Service) DiscoverUsers(ctx context.Context, viewerID string) ([]SuggestedUser, error) {
+	refreshBucket := time.Now().Unix() / int64(discoverRefreshWindow/time.Second)
+	refreshSeed := fmt.Sprintf("%s:%d", viewerID, refreshBucket)
+	limit := 4 - int(refreshBucket%2)
+
 	rows, err := s.db.QueryContext(
 		ctx,
 		`
@@ -513,10 +518,12 @@ func (s Service) DiscoverUsers(ctx context.Context, viewerID string) ([]Suggeste
 				AND fr.recipient_id = u.id
 				AND fr.status = 'pending'
 			WHERE u.id <> $1
-			ORDER BY u.created_at DESC
-			LIMIT 30
+			ORDER BY md5($2 || ':' || u.id), u.created_at DESC
+			LIMIT $3
 		`,
 		viewerID,
+		refreshSeed,
+		limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query discover users: %w", err)

@@ -39,6 +39,7 @@ const isAuthenticated = computed(() => Boolean(store.state.currentUser))
 const currentUserId = computed(() => store.state.currentUser?.id || "")
 const isMyPostsScope = computed(() => props.scope === "mine")
 const showDiscoverPanel = computed(() => !isMyPostsScope.value)
+const discoverRefreshIntervalMs = 2 * 60 * 1000
 const pageTitle = computed(() => (isMyPostsScope.value ? "My posts" : "Latest posts"))
 const guestTitle = computed(() => (isMyPostsScope.value ? "Sign in to unlock your posts" : "Sign in to unlock the feed"))
 const guestDescription = computed(() =>
@@ -72,6 +73,7 @@ const selectedPostId = ref("")
 const previousBodyOverflow = ref("")
 const removeRealtimeListeners = []
 const subscribedPostIds = new Set()
+let discoverRefreshIntervalId = 0
 const postsSummary = computed(() => {
   if (isLoading.value) {
     return isMyPostsScope.value ? "Refreshing your posts..." : "Refreshing the feed..."
@@ -236,6 +238,41 @@ function unsubscribeAllPostRooms() {
   }
 
   subscribedPostIds.clear()
+}
+
+function stopDiscoverRefresh() {
+  if (!discoverRefreshIntervalId || typeof window === "undefined") {
+    discoverRefreshIntervalId = 0
+    return
+  }
+
+  window.clearInterval(discoverRefreshIntervalId)
+  discoverRefreshIntervalId = 0
+}
+
+async function refreshDiscoverUsers() {
+  if (!isAuthenticated.value || !showDiscoverPanel.value) {
+    suggestedUsers.value = []
+    stopDiscoverRefresh()
+    return
+  }
+
+  try {
+    suggestedUsers.value = await fetchDiscoverUsers()
+  } catch {
+    // Keep the current suggestions if the background refresh fails.
+  }
+}
+
+function startDiscoverRefresh() {
+  stopDiscoverRefresh()
+  if (!isAuthenticated.value || !showDiscoverPanel.value || typeof window === "undefined") {
+    return
+  }
+
+  discoverRefreshIntervalId = window.setInterval(() => {
+    void refreshDiscoverUsers()
+  }, discoverRefreshIntervalMs)
 }
 
 function ensureCommentState(postId) {
@@ -588,6 +625,7 @@ function applyUpdatedComment(postId, updatedComment) {
 
 async function loadFeedData() {
   if (!isAuthenticated.value) {
+    stopDiscoverRefresh()
     unsubscribeAllPostRooms()
     posts.value = []
     suggestedUsers.value = []
@@ -624,6 +662,7 @@ async function loadFeedData() {
     unsubscribeAllPostRooms()
     posts.value = feedPosts
     suggestedUsers.value = discoverUsers
+    startDiscoverRefresh()
 
     clearObject(activeSlides)
     clearObject(expandedComments)
@@ -1143,6 +1182,7 @@ onBeforeUnmount(() => {
   }
 
   unsubscribeAllPostRooms()
+  stopDiscoverRefresh()
   removeRealtimeListeners.splice(0).forEach((dispose) => dispose())
 })
 
