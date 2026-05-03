@@ -3,13 +3,6 @@ import { computed, onMounted, ref } from "vue"
 
 import { isApiError, oauthLogin } from "../../services/api"
 
-const props = defineProps({
-  mode: {
-    type: String,
-    default: "login"
-  }
-})
-
 const emit = defineEmits(["authenticated"])
 
 const googleButton = ref(null)
@@ -23,7 +16,6 @@ const googleClientId = normalizeGoogleClientId(rawGoogleClientId)
 const appleClientId = normalizeAppleClientId(rawAppleClientId)
 const appleRedirectURI = import.meta.env.VITE_APPLE_REDIRECT_URI || window.location.origin
 
-const googleButtonText = computed(() => (props.mode === "register" ? "signup_with" : "signin_with"))
 const hasAnyProvider = computed(() => Boolean(googleClientId || appleClientId))
 const oauthConfigHint = computed(() => {
   if (String(rawGoogleClientId).trim() && !googleClientId) {
@@ -159,7 +151,7 @@ async function renderGoogleButton() {
       theme: "outline",
       size: "large",
       shape: "pill",
-      text: googleButtonText.value,
+      text: "continue_with",
       width: 280
     })
     isGoogleReady.value = true

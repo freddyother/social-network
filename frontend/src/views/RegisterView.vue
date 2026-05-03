@@ -321,7 +321,7 @@ async function handleSocialAuthenticated(user) {
           {{ isSubmitting ? "Creating account..." : "Create account" }}
         </button>
       </form>
-      <SocialAuthButtons mode="register" @authenticated="handleSocialAuthenticated" />
+      <SocialAuthButtons @authenticated="handleSocialAuthenticated" />
     </div>
   </section>
 </template>
