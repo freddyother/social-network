@@ -1,0 +1,3 @@
+-- This migration only adds existing real users to existing seed groups.
+-- It is intentionally not reversed to avoid removing memberships that may
+-- have become real user data after the seed was applied.
